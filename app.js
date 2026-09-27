@@ -450,7 +450,7 @@ function renderStudents() {
       <div class="student-name"><b>${student.name}</b><small>${student.absences} Fehlstd. · ${quarterGrades.length} Einträge in ${state.quarter}</small></div>
       <div class="grade-value previous-cell">${priorQuarter && student.previous != null ? student.previous : "—"}<small>${priorQuarter || "Neustart"}</small></div>
       <div class="grade-value">${avg === null ? "—" : avg.toFixed(2).replace(".",",")}<small>Vorschlag ${final ?? "—"}</small></div>
-      <div class="grade-buttons">${[1,2,3,4,5,6].map(n=>`<button data-add-grade="${n}" data-student-id="${student.id}" aria-label="Note ${n} für ${student.name}">${n}</button>`).join("")}<button class="absence-button ${activeEntryArea === "written" ? "hidden" : ""}" data-absent="${student.id}">Abw.</button></div>
+      <div class="grade-buttons">${[1,2,3,4,5,6].map(n=>`<button class="${currentManualGrade(student)?.v===n?"active":""}" data-add-grade="${n}" data-student-id="${student.id}" aria-label="Note ${n} für ${student.name}">${n}</button>`).join("")}<button class="absence-button ${activeEntryArea === "written" ? "hidden" : ""}" data-absent="${student.id}">Abw.</button></div>
       <button class="more-button" data-more="${student.id}" aria-label="Zusatzmenü für ${student.name}">•••</button>${detail}
     </div>`;
   }).join("");
@@ -460,6 +460,12 @@ function renderStudents() {
 }
 
 function labelCategory(c) { return ({oral:"Mündl.",written:"Schriftl.",other:"Sonst."})[c]; }
+
+function currentManualGrade(student) {
+  const category = activeEntryArea === "written" ? "written" : activeCategory;
+  const type = activeEntryArea === "written" ? activeWrittenType : undefined;
+  return student.grades.find(grade => !grade.lessonKey && grade.date === dateKey(today) && grade.quarter === state.quarter && grade.schoolYear === state.settings.schoolYear && (category === "written" ? grade.c === "written" && grade.type === type : ["oral","other"].includes(grade.c)));
+}
 
 function syncEntryControls() {
   const isWritten = activeEntryArea === "written";
@@ -685,8 +691,12 @@ function openLessonGradeDialog({courseId,lessonKeyValue,date,duration}) {
 
 function addLessonGrade(note,studentId) {
   const dialog=q("#detailDialog"); const course=state.courses.find(candidate=>candidate.id===dialog.dataset.gradeCourseId); const student=state.rosters[course.rosterId].find(candidate=>candidate.id===studentId); const key=dialog.dataset.gradeLessonKey; const duration=Number(dialog.dataset.gradeDuration); const attendanceKey=lessonAttendanceKey(key,studentId); const absent=state.attendance[attendanceKey];
+  const existing=student.grades.find(entry=>entry.lessonKey===key); const category=dialog.dataset.gradeCategory||"oral";
+  if(existing?.v===note && existing.c===category) {
+    student.grades=student.grades.filter(entry=>entry!==existing); saveState(); q("#lessonGradeRows").innerHTML=lessonGradeRows(course.id,key,duration); showToast(`Note für ${student.name} entfernt`); return;
+  }
   if(absent) { student.absences=Math.max(0,student.absences-absent.hours); delete state.attendance[attendanceKey]; }
-  const existing=student.grades.find(entry=>entry.lessonKey===key); const entry={id:existing?.id||newGradeId(),v:note,c:dialog.dataset.gradeCategory||"oral",w:duration,lessonKey:key,date:key.split("|")[0],quarter:state.quarter,schoolYear:state.settings.schoolYear};
+  const entry={id:existing?.id||newGradeId(),v:note,c:category,w:duration,lessonKey:key,date:key.split("|")[0],quarter:state.quarter,schoolYear:state.settings.schoolYear};
   if(existing) Object.assign(existing,entry); else student.grades.push(entry);
   saveState(); q("#lessonGradeRows").innerHTML=lessonGradeRows(course.id,key,duration); showToast(`Note ${note} für ${student.name} gespeichert`);
 }
@@ -976,7 +986,12 @@ function initEvents() {
       const student = currentStudents().find(s=>s.id===Number(gradeButton.dataset.studentId));
       const category = activeEntryArea === "written" ? "written" : activeCategory;
       const weight = activeEntryArea === "written" ? 1 : activeWeight;
-      student.grades.push({id:newGradeId(),v:Number(gradeButton.dataset.addGrade),c:category,w:weight,type:activeEntryArea === "written" ? activeWrittenType : undefined,quarter:state.quarter,schoolYear:state.settings.schoolYear,date:dateKey(today)}); saveState(); renderStudents(); renderToday();
+      const note=Number(gradeButton.dataset.addGrade); const existing=currentManualGrade(student);
+      if(existing?.v===note && existing.c===category && existing.w===weight) {
+        student.grades=student.grades.filter(grade=>grade!==existing); saveState(); renderStudents(); renderToday(); showToast(`Note für ${student.name} entfernt`); return;
+      }
+      const entry={id:existing?.id||newGradeId(),v:note,c:category,w:weight,type:activeEntryArea === "written" ? activeWrittenType : undefined,quarter:state.quarter,schoolYear:state.settings.schoolYear,date:dateKey(today)};
+      if(existing) Object.assign(existing,entry); else student.grades.push(entry); saveState(); renderStudents(); renderToday();
       const context = activeEntryArea === "written" ? activeWrittenType : `${labelCategory(category)} · ${weight}×`;
       showToast(`Note ${gradeButton.dataset.addGrade} (${context}) für ${student.name} gespeichert`);
     }
@@ -1002,9 +1017,9 @@ function initEvents() {
   q("#unlockPin").addEventListener("keydown",event=>{ if(event.key==="Enter") unlockApp(); });
 
   q("#entryAreaControl").addEventListener("click", e => { if(!e.target.dataset.area)return; activeEntryArea=e.target.dataset.area; qa("button",e.currentTarget).forEach(b=>b.classList.toggle("active",b===e.target)); syncEntryControls(); renderStudents(); });
-  q("#lessonCategoryControl").addEventListener("click", e => { if(!e.target.dataset.category)return; activeCategory=e.target.dataset.category; qa("button",e.currentTarget).forEach(b=>b.classList.toggle("active",b===e.target)); });
-  q("#weightControl").addEventListener("click", e => { if(!e.target.dataset.weight)return; activeWeight=Number(e.target.dataset.weight); qa("button",e.currentTarget).forEach(b=>b.classList.toggle("active",b===e.target)); q("#lessonWeightLabel").textContent=activeWeight===2?"Doppelstunde · 2×":"Einzelstunde · 1×"; });
-  q("#writtenTypeControl").addEventListener("click", e => { if(!e.target.dataset.writtenType)return; activeWrittenType=e.target.dataset.writtenType; qa("button",e.currentTarget).forEach(b=>b.classList.toggle("active",b===e.target)); syncEntryControls(); });
+  q("#lessonCategoryControl").addEventListener("click", e => { if(!e.target.dataset.category)return; activeCategory=e.target.dataset.category; qa("button",e.currentTarget).forEach(b=>b.classList.toggle("active",b===e.target)); renderStudents(); });
+  q("#weightControl").addEventListener("click", e => { if(!e.target.dataset.weight)return; activeWeight=Number(e.target.dataset.weight); qa("button",e.currentTarget).forEach(b=>b.classList.toggle("active",b===e.target)); q("#lessonWeightLabel").textContent=activeWeight===2?"Doppelstunde · 2×":"Einzelstunde · 1×"; renderStudents(); });
+  q("#writtenTypeControl").addEventListener("click", e => { if(!e.target.dataset.writtenType)return; activeWrittenType=e.target.dataset.writtenType; qa("button",e.currentTarget).forEach(b=>b.classList.toggle("active",b===e.target)); syncEntryControls(); renderStudents(); });
   q("#togglePrevious").addEventListener("click", e => { const visible=e.currentTarget.dataset.visible!=="true"; e.currentTarget.dataset.visible=String(visible); e.currentTarget.textContent=visible?"Vorherige Note ausblenden":"Vorherige Note einblenden"; renderStudents(); });
   q("#studentRows").addEventListener("change", e => { if(!e.target.dataset.finalStudent)return; const key=`${state.settings.schoolYear}-${state.courseId}-${state.quarter}-${e.target.dataset.finalStudent}`; if(e.target.value) state.finalOverrides[key]=Number(e.target.value); else delete state.finalOverrides[key];saveState();renderStudents();showToast("Pädagogische Endnote übernommen"); });
   q("#courseSelect").addEventListener("change", e => { state.courseId=e.target.value;saveState();renderStudents(); });

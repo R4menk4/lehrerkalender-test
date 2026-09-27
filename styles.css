@@ -148,7 +148,7 @@ select { min-width:190px;padding:9px 34px 9px 11px;border:1px solid var(--line);
 .student-row { padding:13px 18px;border-top:1px solid var(--line); }
 .student-name b,.student-name small { display:block; }.student-name b { font-size:13px; }.student-name small { margin-top:2px;color:var(--muted);font-size:10px; }
 .grade-value { font:600 19px/1 "Fraunces",serif; }.grade-value small { font:400 9px/1 "DM Sans",sans-serif;color:var(--muted);display:block;margin-top:4px; }
-.grade-buttons { display:flex;gap:5px; }.grade-buttons button { width:31px;height:31px;border:1px solid var(--line);background:white;border-radius:8px;cursor:pointer;font-weight:700;font-size:12px; }.grade-buttons button:hover { background:var(--green);color:white;border-color:var(--green); }.absence-button { width:auto!important;padding:0 8px;color:#a05a49; }
+.grade-buttons { display:flex;gap:5px; }.grade-buttons button { width:31px;height:31px;border:1px solid var(--line);background:white;border-radius:8px;cursor:pointer;font-weight:700;font-size:12px; }.grade-buttons button:hover,.grade-buttons button.active { background:var(--green);color:white;border-color:var(--green); }.absence-button { width:auto!important;padding:0 8px;color:#a05a49; }
 .more-button { width:34px;height:34px;border:0;background:#f0eee8;border-radius:9px;cursor:pointer; }
 .previous-cell { display:none; }.show-previous .previous-cell { display:block; }.show-previous .grade-head,.show-previous .student-row { grid-template-columns:minmax(170px,1.5fr) 70px 90px minmax(275px,2fr) 42px; }
 .grade-table:not(.show-previous) .grade-head,.grade-table:not(.show-previous) .student-row { grid-template-columns:minmax(170px,1.5fr) 90px minmax(275px,2fr) 42px; }
