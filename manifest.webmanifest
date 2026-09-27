@@ -1,0 +1,10 @@
+{
+  "name": "Mein Lehrerkalender",
+  "short_name": "Lehrerkalender",
+  "description": "Persönlicher, übersichtlicher Lehrerkalender",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f7f5ef",
+  "theme_color": "#315c52",
+  "icons": [{"src":"icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}]
+}

@@ -1,0 +1,4 @@
+lehrerkalender-sicherung-*.json
+*.local.json
+.env
+.env.*

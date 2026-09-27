@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#315c52">
+  <meta name="description" content="Persönlicher Lehrerkalender – klickbarer Prototyp">
+  <title>Mein Lehrerkalender</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css?v=14">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">L</div>
+        <div><strong>Lehrerkalender</strong><span>Mein Schulalltag</span></div>
+      </div>
+      <nav class="main-nav" aria-label="Hauptnavigation">
+        <button class="nav-item active" data-view="today"><span>⌂</span>Heute</button>
+        <button class="nav-item" data-view="timetable"><span>▦</span>Stundenplan</button>
+        <button class="nav-item" data-view="courses"><span>◎</span>Kurse</button>
+        <button class="nav-item" data-view="grades"><span>✓</span>Noten</button>
+      </nav>
+      <div class="sidebar-footer">
+        <button class="sync-pill" id="syncButton"><span class="sync-dot"></span><span>Daten nur auf diesem Gerät</span></button>
+        <button class="nav-item muted" id="resetDemo"><span>↺</span>Testdaten zurücksetzen</button>
+      </div>
+    </aside>
+
+    <div class="content-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow" id="dateLabel"></p>
+          <h1 id="pageTitle">Guten Morgen</h1>
+        </div>
+        <div class="topbar-actions">
+          <button class="icon-button" id="notificationButton" aria-label="Hinweise"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg><span class="notification-dot"></span></button>
+          <button class="avatar" id="profileButton" title="Einstellungen & Daten">I</button>
+        </div>
+      </header>
+
+      <main id="mainContent">
+        <section class="view active" id="view-today">
+          <div class="welcome-strip" id="nextLessonCard"></div>
+
+          <div class="dashboard-grid">
+            <article class="panel schedule-panel">
+              <div class="panel-heading">
+                <div><span class="soft-label" id="todayWeekday"></span><h3>Heute</h3></div>
+                <button class="text-button" data-view-target="timetable">Wochenplan</button>
+              </div>
+              <div id="todaySchedule"></div>
+              <div class="tomorrow-preview" id="nextDayPreview"></div>
+            </article>
+
+            <article class="panel tasks-panel">
+              <div class="panel-heading"><div><span class="soft-label">Im Blick behalten</span><h3>Offen</h3></div><span class="count-badge" id="dashboardAttentionCount">0</span></div>
+              <div id="dashboardAttention"></div>
+            </article>
+
+            <article class="panel compact-panel">
+              <span class="soft-label">Diese Woche</span>
+              <div class="metric-row"><div><strong id="weeklyLessonCount">0</strong><span>Unterrichtsstunden</span></div><div><strong id="weeklyCourseCount">0</strong><span>Kurse</span></div><div><strong id="weeklyDoubleCount">0</strong><span>Doppelstunden</span></div></div>
+            </article>
+
+            <article class="panel compact-panel accent-panel">
+              <span class="soft-label">Notenstand</span>
+              <h3 id="gradeAttentionTitle">Notenstand wird berechnet</h3>
+              <p id="gradeAttentionText"></p>
+              <button class="text-button light" data-view-target="grades">Zu den Noten →</button>
+            </article>
+          </div>
+        </section>
+
+        <section class="view" id="view-timetable">
+          <div class="section-toolbar">
+            <div><span class="soft-label" id="timetableWeekLabel">Datierte Unterrichtswoche</span><h2>Stundenplan</h2></div>
+            <div class="toolbar-actions"><div class="week-switch"><button id="previousWeek" aria-label="Vorherige Woche">←</button><button id="currentWeek">Diese Woche</button><button id="nextWeek" aria-label="Nächste Woche">→</button></div><button class="secondary-button" id="addException">＋ Änderung</button><button class="primary-button" id="addLesson">＋ Unterricht</button></div>
+          </div>
+          <div class="notice"><span>☀</span><div><b>Herbstferien automatisch berücksichtigt</b><small>12.–24. Oktober 2026 · Nordrhein-Westfalen</small></div><button class="text-button" id="editHoliday">Bearbeiten</button></div>
+          <div class="timetable-wrap panel">
+            <div class="timetable" id="timetableGrid"></div>
+          </div>
+          <div class="legend"><span><i class="mint"></i>Chemie</span><span><i class="coral"></i>Biologie</span><span><i class="blue"></i>Naturwissenschaften</span><span><i class="gold"></i>Sonstiges</span></div>
+        </section>
+
+        <section class="view" id="view-courses">
+          <div class="section-toolbar"><div><span class="soft-label" id="courseCountLabel">6 aktive Kurse</span><h2>Meine Kurse</h2></div><button class="primary-button" id="addCourse">＋ Kurs anlegen</button></div>
+          <div class="course-grid" id="courseGrid"></div>
+        </section>
+
+        <section class="view" id="view-grades">
+          <div class="section-toolbar grades-toolbar">
+            <div><span class="soft-label">Leistungsübersicht</span><h2>Noten</h2></div>
+            <div class="toolbar-actions">
+              <button class="secondary-button" id="openSeries">Unterrichtsreihe</button>
+              <label class="select-field"><span>Kurs</span><select id="courseSelect"></select></label>
+              <label class="select-field small"><span>Quartal</span><select id="quarterSelect"><option value="Q1">Q1</option><option value="Q2" selected>Q2</option><option value="Q3">Q3</option><option value="Q4">Q4</option></select></label>
+            </div>
+          </div>
+
+          <div class="grade-summary">
+            <div class="summary-card"><span>Gewichtung mit Schriftlich</span><strong>50 / 40 / 10</strong><small>Ohne Schriftlich: 80 % mündlich · 20 % sonstige</small></div>
+            <div class="summary-card"><span>Erfassung</span><strong id="lessonWeightLabel">Doppelstunde · 2×</strong><small>Aus Stundenplan übernommen</small></div>
+            <div class="summary-card action-card"><span>Fehlstunden</span><strong id="absenceSummary">11 offen</strong><button class="text-button" id="openAbsences">Quartal abgleichen →</button></div>
+          </div>
+
+          <div class="grade-controls panel">
+            <div class="control-group"><span class="control-label">Erfassungsbereich</span><div class="segmented strong-segmented" id="entryAreaControl"><button class="active" data-area="lesson">Unterricht</button><button data-area="written">Schriftlich</button></div></div>
+            <div class="control-group" id="lessonCategoryGroup"><span class="control-label">Note dieser Stunde</span><div class="segmented" id="lessonCategoryControl"><button class="active" data-category="oral">Mündlich</button><button data-category="other">Sonstige</button></div></div>
+            <div class="control-group" id="lessonWeightGroup"><span class="control-label">Unterrichtsdauer</span><div class="segmented" id="weightControl"><button data-weight="1">Einzel · 1×</button><button class="active" data-weight="2">Doppel · 2×</button></div></div>
+            <div class="control-group hidden" id="writtenTypeGroup"><span class="control-label">Leistungsnachweis</span><div class="segmented" id="writtenTypeControl"><button class="active" data-written-type="Klausur">Klausur</button><button data-written-type="Lerncheck">Lerncheck</button></div></div>
+            <button class="secondary-button previous-toggle" id="togglePrevious">Vorherige Note einblenden</button>
+          </div>
+
+          <div class="grade-table panel">
+            <div class="grade-head">
+              <div>Schüler:in</div><div class="previous-cell">Vorher</div><div>Aktuell</div><div class="grade-actions-head">Neue Note</div><div></div>
+            </div>
+            <div id="studentRows"></div>
+          </div>
+          <p class="privacy-note">Dieser Prototyp enthält ausschließlich frei erfundene Testdaten und speichert Änderungen nur in diesem Browser.</p>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <nav class="mobile-nav" aria-label="Mobile Navigation">
+    <button class="active" data-view="today"><span>⌂</span>Heute</button>
+    <button data-view="timetable"><span>▦</span>Plan</button>
+    <button data-view="courses"><span>◎</span>Kurse</button>
+    <button data-view="grades"><span>✓</span>Noten</button>
+  </nav>
+
+  <dialog id="detailDialog" class="app-dialog"></dialog>
+  <dialog id="absenceDialog" class="app-dialog wide-dialog"></dialog>
+  <div class="privacy-lock hidden" id="privacyLock" role="dialog" aria-modal="true" aria-labelledby="privacyLockTitle">
+    <div class="privacy-lock-card"><div class="brand-mark">L</div><span class="soft-label">Lokaler Blickschutz</span><h2 id="privacyLockTitle">Lehrerkalender gesperrt</h2><p>Gib deine PIN ein, um die lokal gespeicherten Daten anzuzeigen.</p><input type="password" inputmode="numeric" maxlength="8" id="unlockPin" aria-label="PIN" placeholder="PIN"><button class="primary-button" id="unlockApp">Entsperren</button><small id="unlockStatus"></small></div>
+  </div>
+  <div class="toast" id="toast" role="status"></div>
+  <script src="app.js?v=30"></script>
+</body>
+</html>
