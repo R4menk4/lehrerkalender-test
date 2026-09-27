@@ -990,4 +990,4 @@ document.addEventListener("visibilitychange",()=>{
 });
 if(state.settings.lockHash) showPrivacyLock();
 
-if("serviceWorker" in navigator && location.protocol.startsWith("http")) navigator.serviceWorker.register("./sw.js").catch(()=>{});
+if("serviceWorker" in navigator && location.protocol.startsWith("http")) navigator.serviceWorker.register("./sw.js",{updateViaCache:"none"}).then(registration=>registration.update()).catch(()=>{});
