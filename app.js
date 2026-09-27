@@ -1,5 +1,6 @@
 const today = new Date();
 const storageKey = "lehrerkalender-prototype-v1";
+const coursePalette = ["#5f8f7f","#6f8fb4","#c07a68","#9a7db5","#c39b52","#4f9aa8","#b26f8b","#7f9360","#d08a4f","#6586a8","#a47761","#718f96"];
 
 const defaultCourses = [
   { id:"beispielkurs", name:"Testkurs", subject:"Beispielfach", room:"R 1", color:"#76a992", organization:"course", courseType:"Grundkurs", rosterId:"course-beispiel", written:true }
@@ -60,6 +61,11 @@ function newGradeId() { return `grade-${Date.now()}-${Math.random().toString(36)
 
 function normalizeAcademicData(data) {
   data.archives ||= [];
+  if(data.courseColorVersion!==1) {
+    let colorIndex=0;
+    (data.courses||[]).forEach(course=>{ course.color=course.organizationOnly?"#c19a52":coursePalette[colorIndex++%coursePalette.length]; });
+    data.courseColorVersion=1;
+  }
   Object.values(data.rosters || {}).forEach(roster => roster.forEach(student => {
     student.grades ||= [];
     student.absences = Number(student.absences || 0);
@@ -110,6 +116,8 @@ function q(selector, root=document) { return root.querySelector(selector); }
 function qa(selector, root=document) { return [...root.querySelectorAll(selector)]; }
 function currentCourse() { return state.courses.find(course => course.id === state.courseId) || state.courses[0]; }
 function currentStudents() { const course = currentCourse(); return state.rosters[course.rosterId] || (state.rosters[course.rosterId] = []); }
+function safeCourseColor(course) { return /^#[0-9a-f]{6}$/i.test(course?.color||"")?course.color:coursePalette[0]; }
+function nextCourseColor() { return coursePalette[state.courses.filter(course=>!course.organizationOnly).length%coursePalette.length]; }
 
 function showToast(message) {
   const toast = q("#toast");
@@ -179,9 +187,9 @@ function lessonsOnDate(date) {
 function renderToday() {
   q("#todayWeekday").textContent=new Intl.DateTimeFormat("de-DE",{weekday:"long"}).format(today);
   const todayLessons=lessonsOnDate(today);
-  q("#todaySchedule").innerHTML=todayLessons.length ? todayLessons.map(item=>`<div class="mini-lesson"><span class="time">${timetableTimes[item.row].time}</span><span class="course-color ${timetableColor(item.course)}"></span><div><b>${escapeHtml(item.course.name)} · ${escapeHtml(item.course.subject)}</b><small>${item.canceled?"Fällt aus":`${escapeHtml(item.room||"ohne Raum")} · ${item.duration===2?"Doppelstunde":"Einzelstunde"}`}</small></div></div>`).join("") : `<div class="empty-sunday"><div class="leaf-icon">✓</div><h4>Heute ist unterrichtsfrei</h4><p>Ein guter Moment, die kommende Woche in Ruhe vorzubereiten.</p></div>`;
+  q("#todaySchedule").innerHTML=todayLessons.length ? todayLessons.map(item=>`<div class="mini-lesson"><span class="time">${timetableTimes[item.row].time}</span><span class="course-color" style="background:${safeCourseColor(item.course)}"></span><div><b>${escapeHtml(item.course.name)} · ${escapeHtml(item.course.subject)}</b><small>${item.canceled?"Fällt aus":`${escapeHtml(item.room||"ohne Raum")} · ${item.duration===2?"Doppelstunde":"Einzelstunde"}`}</small></div></div>`).join("") : `<div class="empty-sunday"><div class="leaf-icon">✓</div><h4>Heute ist unterrichtsfrei</h4><p>Ein guter Moment, die kommende Woche in Ruhe vorzubereiten.</p></div>`;
   let nextDay=null; for(let offset=1;offset<=14;offset++) { const date=addDays(today,offset); const lessons=lessonsOnDate(date); if(lessons.length) { nextDay={date,lessons}; break; } }
-  q("#nextDayPreview").innerHTML=nextDay ? `<strong>${new Intl.DateTimeFormat("de-DE",{weekday:"long",day:"2-digit",month:"2-digit"}).format(nextDay.date)}</strong>${nextDay.lessons.slice(0,4).map(item=>`<div class="mini-lesson"><span class="time">${timetableTimes[item.row].time}</span><span class="course-color ${timetableColor(item.course)}"></span><div><b>${escapeHtml(item.course.name)} · ${escapeHtml(item.course.subject)}</b><small>${item.canceled?"Fällt aus":escapeHtml(item.room||"ohne Raum")}</small></div></div>`).join("")}` : "";
+  q("#nextDayPreview").innerHTML=nextDay ? `<strong>${new Intl.DateTimeFormat("de-DE",{weekday:"long",day:"2-digit",month:"2-digit"}).format(nextDay.date)}</strong>${nextDay.lessons.slice(0,4).map(item=>`<div class="mini-lesson"><span class="time">${timetableTimes[item.row].time}</span><span class="course-color" style="background:${safeCourseColor(item.course)}"></span><div><b>${escapeHtml(item.course.name)} · ${escapeHtml(item.course.subject)}</b><small>${item.canceled?"Fällt aus":escapeHtml(item.room||"ohne Raum")}</small></div></div>`).join("")}` : "";
   let nextLesson=null; for(let offset=0;offset<=21&&!nextLesson;offset++) nextLesson=lessonsOnDate(addDays(today,offset)).find(item=>!item.canceled&&!item.course.organizationOnly);
   q("#nextLessonCard").innerHTML=nextLesson ? `<div><span class="soft-label">Dein nächster Unterricht</span><h2>${escapeHtml(nextLesson.course.name)} · ${escapeHtml(nextLesson.course.subject)}</h2><p>${formatShortDate(nextLesson.date)} · ${nextLesson.row+1}. Stunde · ${escapeHtml(nextLesson.room||"ohne Raum")}${nextLesson.duration===2?" · Doppelstunde":""}</p></div><button class="primary-button" data-open-course="${nextLesson.course.id}">Kurs öffnen <span>→</span></button>` : `<div><span class="soft-label">Dein nächster Unterricht</span><h2>Kein Termin gefunden</h2><p>In den kommenden drei Wochen ist kein Unterricht eingetragen.</p></div><button class="primary-button" data-view-target="timetable">Stundenplan öffnen</button>`;
   const notes=buildNotifications().slice(0,4); q("#dashboardAttentionCount").textContent=notes.length;
@@ -399,16 +407,18 @@ function renderTimetable() {
       const date=addDays(monday,col); const dateString=dateKey(date); const rawItem=state.timetable[row*5+col]; const continuation=rawItem?.continuesFrom!==undefined; const baseItem=continuation?state.timetable[rawItem.continuesFrom]:rawItem; const lessonRow=continuation?Math.floor(rawItem.continuesFrom/5):row; const change=state.scheduleChanges[scheduleChangeKey(dateString,lessonRow)];
       if(!baseItem && !change?.courseId) { html+='<div class="tt-cell"></div>'; continue; }
       const replacementCourse=change?.courseId?state.courses.find(candidate=>candidate.id===change.courseId):null;
-      const item=replacementCourse?{courseId:replacementCourse.id,color:timetableColor(replacementCourse),room:change.room,duration:baseItem?.duration||1}:baseItem;
+      const item=replacementCourse?{courseId:replacementCourse.id,room:change.room,duration:baseItem?.duration||1}:baseItem;
       const course=state.courses.find(c=>c.id===item?.courseId); if(!course) { html+='<div class="tt-cell"></div>'; continue; }
       const key=lessonKey(date,course.id,lessonRow); const plan=state.lessonPlans[key]||{}; const ids=assignmentCache[course.id]?.[key]||[]; const series=state.seriesByCourse[course.id];
       const topics=ids.map(id=>series?.units.find(unit=>unit.id===id)?.title).filter(Boolean); const status=change?.kind==="cancel"?"canceled":(plan.status || (topics.length?"planned":"")); const book=homeworkDueFor(date,course.id,row);
       const doubleClass=item.duration===2?(continuation?"double-end":"double-start"):"";
       const shownRoom=change?.kind==="room"?change.room:(item.room ?? course.room ?? ""); const changeLabel=change?.kind==="cancel"?"Ausfall":change?.kind==="room"?`Raum → ${escapeHtml(change.room)}`:change?.kind==="replacement"?"Vertretung / zusätzlich":"";
-      html+=`<div class="tt-cell lesson ${item.color} ${status} ${doubleClass} ${change?"has-change":""}" data-lesson-key="${key}" data-course-id="${course.id}" data-row="${lessonRow}" data-duration="${item.duration||1}" data-date="${dateString}">${continuation?`<span class="double-continuation">Fortsetzung · Doppelstunde</span>`:`<b>${course.name} · ${course.subject}</b><span>${escapeHtml(shownRoom)} · ${(item.duration||1)}×</span>${changeLabel?`<span class="change-badge">${changeLabel}</span>`:""}${topics.length?`<div class="lesson-topics">${topics.map(topic=>`<span class="topic-segment">${escapeHtml(topic)}</span>`).join("")}</div>`:""}<span class="lesson-markers">${book?'<i title="Hausaufgabe fällig">📖</i>':""}${status==="done"?'<i class="done-check">✓</i>':""}</span>`}</div>`;
+      html+=`<div class="tt-cell lesson course-tone ${status} ${doubleClass} ${change?"has-change":""}" style="--lesson-color:${safeCourseColor(course)}" data-lesson-key="${key}" data-course-id="${course.id}" data-row="${lessonRow}" data-duration="${item.duration||1}" data-date="${dateString}">${continuation?`<span class="double-continuation">Fortsetzung · Doppelstunde</span>`:`<b>${course.name} · ${course.subject}</b><span>${escapeHtml(shownRoom)} · ${(item.duration||1)}×</span>${changeLabel?`<span class="change-badge">${changeLabel}</span>`:""}${topics.length?`<div class="lesson-topics">${topics.map(topic=>`<span class="topic-segment">${escapeHtml(topic)}</span>`).join("")}</div>`:""}<span class="lesson-markers">${book?'<i title="Hausaufgabe fällig">📖</i>':""}${status==="done"?'<i class="done-check">✓</i>':""}</span>`}</div>`;
     }
   });
   q("#timetableGrid").innerHTML=html;
+  const legendCourses=state.courses.filter(course=>state.timetable.some(item=>item?.courseId===course.id));
+  q("#timetableLegend").innerHTML=legendCourses.map(course=>`<span><i style="background:${safeCourseColor(course)}"></i>${escapeHtml(course.name)} · ${escapeHtml(course.subject)}</span>`).join("");
 }
 
 function renderStudents() {
@@ -527,7 +537,7 @@ function createCourseFromDialog() {
   } else rosterId = `course-${Date.now()}`;
   if (!state.rosters[rosterId]) state.rosters[rosterId] = [];
   addUniqueStudents(state.rosters[rosterId], [...parseStudentNames(q("#newCourseStudents").value),...pendingStudentImport]);
-  state.courses.push({ id, name, subject, room:q("#courseRoomInput").value.trim(), color:organization === "class" ? "#6288a0" : "#76a992", organization, courseType:organization === "course" ? q("#courseTypeInput").value : undefined, rosterId, written:q("#courseWrittenInput").checked });
+  state.courses.push({ id, name, subject, room:q("#courseRoomInput").value.trim(), color:nextCourseColor(), organization, courseType:organization === "course" ? q("#courseTypeInput").value : undefined, rosterId, written:q("#courseWrittenInput").checked });
   state.courseId = id; saveState(); q("#detailDialog").close(); renderCourses(); renderStudents(); showToast(`${name} · ${subject} wurde angelegt`);
 }
 
@@ -646,13 +656,6 @@ function toggleLessonAbsence(studentId) {
   saveState(); q("#lessonGradeRows").innerHTML=lessonGradeRows(course.id,key,duration); showToast(absent?`${student.name} wieder als anwesend markiert`:`${student.name}: ${duration} Fehlstunde${duration===1?"":"n"} erfasst`);
 }
 
-function timetableColor(course) {
-  if(course.organizationOnly) return "gold";
-  if(course.color === "#76a992") return "mint";
-  if(course.color === "#dd846f") return "coral";
-  return "blue";
-}
-
 function timetableEntryLabel(item, index) {
   const course=state.courses.find(candidate=>candidate.id===item.courseId);
   if(!course) return "Unbekannter Kurs";
@@ -661,21 +664,35 @@ function timetableEntryLabel(item, index) {
   return `${timetableDays[col]} · ${hours} · ${course.name} ${course.subject}`;
 }
 
+function timetableSlotRow(slot={},index=0) {
+  return `<div class="timetable-slot-row">
+    <span class="slot-number">${index+1}</span>
+    <label><span>Wochentag</span><select class="slot-day">${timetableDays.map((day,dayIndex)=>`<option value="${dayIndex}" ${dayIndex===(slot.col??0)?"selected":""}>${day}</option>`).join("")}</select></label>
+    <label><span>Beginn</span><select class="slot-row">${timetableTimes.map((time,rowIndex)=>`<option value="${rowIndex}" ${rowIndex===(slot.row??0)?"selected":""}>${time.label}. Std. · ${time.time}</option>`).join("")}</select></label>
+    <label><span>Dauer</span><select class="slot-duration"><option value="1" ${slot.duration!==2?"selected":""}>Einzelstunde</option><option value="2" ${slot.duration===2?"selected":""}>Doppelstunde</option></select></label>
+    <button type="button" class="slot-remove" data-remove-timetable-slot aria-label="Diesen Termin entfernen">×</button>
+  </div>`;
+}
+
+function renumberTimetableSlots() { qa(".timetable-slot-row").forEach((row,index)=>row.querySelector(".slot-number").textContent=index+1); }
+function addTimetableSlot() { q("#timetableSlots").insertAdjacentHTML("beforeend",timetableSlotRow({},qa(".timetable-slot-row").length)); }
+
 function openTimetableEditor(editIndex=null) {
   const editing=editIndex!==null; const existing=editing ? state.timetable[editIndex] : null;
   const row=editing ? Math.floor(editIndex/5) : 0; const col=editing ? editIndex%5 : 0;
   const selectedCourse=state.courses.find(course=>course.id===existing?.courseId) || state.courses[0];
   const entries=state.timetable.map((item,index)=>item?.courseId ? `<button data-edit-timetable-index="${index}"><span>${escapeHtml(timetableEntryLabel(item,index))}</span><small>Bearbeiten</small></button>` : "").join("");
   const dialog=q("#detailDialog");
-  dialog.innerHTML=`<div class="dialog-inner"><div class="dialog-head"><div><span class="soft-label">Wochenvorlage</span><h3>${editing?"Unterricht ändern":"Unterricht eintragen"}</h3></div><button class="close-dialog">×</button></div>
-    <div class="form-note">Diese Angaben wiederholen sich jede Woche. Planung, Status und Hausaufgaben bleiben bei der einzelnen Stunde.</div>
+  dialog.innerHTML=`<div class="dialog-inner"><div class="dialog-head"><div><span class="soft-label">Wochenvorlage</span><h3>${editing?"Unterricht ändern":"Alle Stunden eines Kurses"}</h3></div><button class="close-dialog">×</button></div>
+    <div class="form-note">${editing?"Diese Angabe wiederholt sich jede Woche.":"Kurs und Raum nur einmal auswählen, danach alle wöchentlichen Unterrichtszeiten ergänzen."} Planung, Status und Hausaufgaben bleiben bei der einzelnen Stunde.</div>
     <div class="form-grid timetable-form">
       <label class="form-field full"><span>Kurs</span><select id="timetableCourseInput">${state.courses.map(course=>`<option value="${course.id}" ${course.id===selectedCourse.id?"selected":""}>${escapeHtml(course.name)} · ${escapeHtml(course.subject)}</option>`).join("")}</select></label>
-      <label class="form-field"><span>Wochentag</span><select id="timetableDayInput">${timetableDays.map((day,index)=>`<option value="${index}" ${index===col?"selected":""}>${day}</option>`).join("")}</select></label>
-      <label class="form-field"><span>Beginn</span><select id="timetableRowInput">${timetableTimes.map((time,index)=>`<option value="${index}" ${index===row?"selected":""}>${time.label}. Stunde · ${time.time}</option>`).join("")}</select></label>
-      <label class="form-field"><span>Dauer</span><select id="timetableDurationInput"><option value="1" ${(existing?.duration||1)===1?"selected":""}>Einzelstunde</option><option value="2" ${existing?.duration===2?"selected":""}>Doppelstunde</option></select></label>
       <label class="form-field full"><span>Raum</span><input id="timetableRoomInput" value="${escapeHtml(existing?.room ?? selectedCourse.room ?? "")}" placeholder="optional"></label>
+      ${editing?`<label class="form-field"><span>Wochentag</span><select id="timetableDayInput">${timetableDays.map((day,index)=>`<option value="${index}" ${index===col?"selected":""}>${day}</option>`).join("")}</select></label>
+      <label class="form-field"><span>Beginn</span><select id="timetableRowInput">${timetableTimes.map((time,index)=>`<option value="${index}" ${index===row?"selected":""}>${time.label}. Stunde · ${time.time}</option>`).join("")}</select></label>
+      <label class="form-field"><span>Dauer</span><select id="timetableDurationInput"><option value="1" ${(existing?.duration||1)===1?"selected":""}>Einzelstunde</option><option value="2" ${existing?.duration===2?"selected":""}>Doppelstunde</option></select></label>`:""}
     </div>
+    ${editing?"":`<div class="editor-section timetable-slots-section"><div class="editor-heading"><h4>Unterrichtszeiten</h4><span class="soft-label">gemeinsam speichern</span></div><div id="timetableSlots" class="timetable-slots">${timetableSlotRow({},0)}</div><button type="button" class="secondary-button series-add" id="addTimetableSlot">＋ Weitere Unterrichtszeit</button></div>`}
     ${!editing&&entries?`<div class="editor-section"><div class="editor-heading"><h4>Vorhandenen Unterricht ändern</h4><span class="soft-label">${state.timetable.filter(item=>item?.courseId).length} Termine</span></div><div class="timetable-entry-list">${entries}</div></div>`:""}
     <div class="dialog-actions">${editing?`<button class="text-button danger-text" data-delete-timetable-index="${editIndex}">Unterricht entfernen</button>`:""}<button class="secondary-button close-dialog">Abbrechen</button><button class="primary-button" id="saveTimetableEntry" data-edit-index="${editing?editIndex:""}">Speichern</button></div></div>`;
   if(!dialog.open) dialog.showModal();
@@ -683,15 +700,30 @@ function openTimetableEditor(editIndex=null) {
 
 function saveTimetableEntry(button) {
   const oldIndex=button.dataset.editIndex==="" ? null : Number(button.dataset.editIndex);
+  if(oldIndex===null) {
+    const course=state.courses.find(candidate=>candidate.id===q("#timetableCourseInput").value); const room=q("#timetableRoomInput").value.trim();
+    const slots=qa(".timetable-slot-row").map(slot=>({row:Number(q(".slot-row",slot).value),col:Number(q(".slot-day",slot).value),duration:Number(q(".slot-duration",slot).value)}));
+    if(!slots.length) { showToast("Bitte mindestens eine Unterrichtszeit eintragen"); return; }
+    const occupied=new Set();
+    for(const slot of slots) {
+      if(slot.duration===2&&slot.row===timetableTimes.length-1) { showToast("Eine Doppelstunde kann nicht in der 8. Stunde beginnen"); return; }
+      const indices=[slot.row*5+slot.col,...(slot.duration===2?[(slot.row+1)*5+slot.col]:[])];
+      if(indices.some(index=>occupied.has(index))) { showToast("Zwei neue Termine überschneiden sich"); return; }
+      if(indices.some(index=>state.timetable[index])) { showToast(`${timetableDays[slot.col]}, ${slot.row+1}. Stunde ist bereits belegt`); return; }
+      indices.forEach(index=>occupied.add(index));
+    }
+    slots.forEach(slot=>{ const index=slot.row*5+slot.col; state.timetable[index]={courseId:course.id,room,duration:slot.duration}; if(slot.duration===2) state.timetable[index+5]={continuesFrom:index}; });
+    saveState(); q("#detailDialog").close(); renderTimetable(); renderToday(); showToast(`${slots.length} Unterrichtstermin${slots.length===1?"":"e"} eingetragen`); return;
+  }
   const row=Number(q("#timetableRowInput").value); const col=Number(q("#timetableDayInput").value); const duration=Number(q("#timetableDurationInput").value); const newIndex=row*5+col;
   if(duration===2 && row===timetableTimes.length-1) { showToast("Eine Doppelstunde kann nicht in der 8. Stunde beginnen"); return; }
   const oldOccupied=oldIndex===null?[]:[oldIndex,...(state.timetable[oldIndex]?.duration===2?[oldIndex+5]:[])]; const newOccupied=[newIndex,...(duration===2?[newIndex+5]:[])];
   if(newOccupied.some(index=>state.timetable[index] && !oldOccupied.includes(index))) { showToast("Mindestens eine dieser Stunden ist bereits belegt"); return; }
   const course=state.courses.find(candidate=>candidate.id===q("#timetableCourseInput").value);
   oldOccupied.forEach(index=>state.timetable[index]=null);
-  state.timetable[newIndex]={courseId:course.id,color:timetableColor(course),room:q("#timetableRoomInput").value.trim(),duration};
+  state.timetable[newIndex]={courseId:course.id,room:q("#timetableRoomInput").value.trim(),duration};
   if(duration===2) state.timetable[newIndex+5]={continuesFrom:newIndex};
-  saveState(); q("#detailDialog").close(); renderTimetable(); showToast(oldIndex===null?"Unterricht eingetragen":"Unterricht geändert");
+  saveState(); q("#detailDialog").close(); renderTimetable(); renderToday(); showToast("Unterricht geändert");
 }
 
 function deleteTimetableEntry(index) {
@@ -873,6 +905,9 @@ function initEvents() {
       deleteScheduleChange(deleteScheduleChangeButton.dataset.deleteScheduleChange); return;
     }
     if(event.target.closest("#addLesson")) { openTimetableEditor(); return; }
+    if(event.target.closest("#addTimetableSlot")) { addTimetableSlot(); return; }
+    const removeTimetableSlot=event.target.closest("[data-remove-timetable-slot]");
+    if(removeTimetableSlot) { if(qa(".timetable-slot-row").length===1) { showToast("Mindestens eine Unterrichtszeit bleibt erforderlich"); return; } removeTimetableSlot.closest(".timetable-slot-row").remove(); renumberTimetableSlots(); return; }
     const editTimetableButton=event.target.closest("[data-edit-timetable-index]");
     if(editTimetableButton) { openTimetableEditor(Number(editTimetableButton.dataset.editTimetableIndex)); return; }
     const saveTimetableButton=event.target.closest("#saveTimetableEntry");
