@@ -1,6 +1,11 @@
 const today = new Date();
 const storageKey = "lehrerkalender-prototype-v1";
-const coursePalette = ["#5f8f7f","#6f8fb4","#c07a68","#9a7db5","#c39b52","#4f9aa8","#b26f8b","#7f9360","#d08a4f","#6586a8","#a47761","#718f96"];
+const courseColorChoices = [
+  ["#5f8f7f","Salbeigrün"],["#6f8fb4","Kornblumenblau"],["#c07a68","Koralle"],["#9a7db5","Violett"],
+  ["#c39b52","Gold"],["#4f9aa8","Türkis"],["#b26f8b","Rosé"],["#7f9360","Olivgrün"],
+  ["#d08a4f","Orange"],["#6586a8","Stahlblau"],["#a47761","Terrakotta"],["#718f96","Graublau"]
+];
+const coursePalette = courseColorChoices.map(([value])=>value);
 
 const defaultCourses = [
   { id:"beispielkurs", name:"Testkurs", subject:"Beispielfach", room:"R 1", color:"#76a992", organization:"course", courseType:"Grundkurs", rosterId:"course-beispiel", written:true }
@@ -114,10 +119,12 @@ function loadState() {
 function saveState() { localStorage.setItem(storageKey, JSON.stringify(state)); }
 function q(selector, root=document) { return root.querySelector(selector); }
 function qa(selector, root=document) { return [...root.querySelectorAll(selector)]; }
-function currentCourse() { return state.courses.find(course => course.id === state.courseId) || state.courses[0]; }
+function activeCourses() { return state.courses.filter(course=>!course.organizationOnly&&!course.timetableOnly&&!course.archived); }
+function currentCourse() { return state.courses.find(course => course.id === state.courseId && !course.archived) || activeCourses()[0] || state.courses[0]; }
 function currentStudents() { const course = currentCourse(); return state.rosters[course.rosterId] || (state.rosters[course.rosterId] = []); }
 function safeCourseColor(course) { return /^#[0-9a-f]{6}$/i.test(course?.color||"")?course.color:coursePalette[0]; }
 function nextCourseColor() { return coursePalette[state.courses.filter(course=>!course.organizationOnly).length%coursePalette.length]; }
+function courseColorOptions(selected) { return courseColorChoices.map(([value,label])=>`<option value="${value}" ${value===selected?"selected":""}>${label}</option>`).join(""); }
 
 function showToast(message) {
   const toast = q("#toast");
@@ -148,7 +155,7 @@ function nextUnplannedLesson() {
   for(let offset=0;offset<21;offset++) {
     const date=addDays(start,offset); const col=date.getDay()-1; if(col<0 || col>4 || isSchoolFree(date)) continue;
     for(let row=0;row<timetableTimes.length;row++) {
-      const raw=state.timetable[row*5+col]; if(!raw?.courseId) continue; const course=state.courses.find(candidate=>candidate.id===raw.courseId); if(!course || course.organizationOnly) continue;
+      const raw=state.timetable[row*5+col]; if(!raw?.courseId) continue; const course=state.courses.find(candidate=>candidate.id===raw.courseId); if(!course || course.organizationOnly || course.archived) continue;
       const key=lessonKey(date,course.id,row); const plan=state.lessonPlans[key]; if(!plan || plan.status==="unplanned") return {date:dateKey(date),row,course};
     }
   }
@@ -178,7 +185,7 @@ function lessonsOnDate(date) {
     const raw=state.timetable[row*5+col]; if(raw?.continuesFrom!==undefined) continue;
     const change=state.scheduleChanges[scheduleChangeKey(dateString,row)];
     if(!raw?.courseId && !change?.courseId) continue;
-    const courseId=change?.courseId || raw?.courseId; const course=state.courses.find(candidate=>candidate.id===courseId); if(!course) continue;
+    const courseId=change?.courseId || raw?.courseId; const course=state.courses.find(candidate=>candidate.id===courseId); if(!course||course.archived) continue;
     result.push({date:dateString,row,course,room:change?.room || raw?.room || course.room || "",duration:raw?.duration || 1,canceled:change?.kind==="cancel"});
   }
   return result;
@@ -196,7 +203,7 @@ function renderToday() {
   q("#dashboardAttention").innerHTML=notes.length?notes.map(item=>`<div class="notification-item"><span>${item.icon}</span><div><b>${escapeHtml(item.title)}</b><small>${escapeHtml(item.detail)}</small></div></div>`).join(""):'<div class="student-empty">Aktuell ist nichts Dringendes offen.</div>';
   const baseLessons=state.timetable.filter(item=>item?.courseId); const teaching=baseLessons.filter(item=>!state.courses.find(course=>course.id===item.courseId)?.organizationOnly);
   q("#weeklyLessonCount").textContent=teaching.reduce((sum,item)=>sum+(item.duration||1),0); q("#weeklyCourseCount").textContent=new Set(teaching.map(item=>item.courseId)).size; q("#weeklyDoubleCount").textContent=teaching.filter(item=>item.duration===2).length;
-  const visible=state.courses.filter(course=>!course.organizationOnly); const attention=visible.map(course=>({course,missing:(state.rosters[course.rosterId]||[]).filter(student=>suggestion(student)===null).length})).filter(item=>item.missing);
+  const visible=activeCourses(); const attention=visible.map(course=>({course,missing:(state.rosters[course.rosterId]||[]).filter(student=>suggestion(student)===null).length})).filter(item=>item.missing);
   q("#gradeAttentionTitle").textContent=attention.length?`${attention.length} ${attention.length===1?"Kurs braucht":"Kurse brauchen"} Aufmerksamkeit`:"Notenstand vollständig";
   q("#gradeAttentionText").textContent=attention.length?`${attention[0].course.name} ${attention[0].course.subject}: ${attention[0].missing} SuS noch ohne Note im ${state.quarter}.`:"Für alle eingetragenen SuS liegt mindestens eine Note vor.";
 }
@@ -313,7 +320,8 @@ function previousQuarter(quarter) {
 }
 
 function renderCourses() {
-  const visibleCourses=state.courses.filter(course=>!course.timetableOnly);
+  const visibleCourses=state.courses.filter(course=>!course.timetableOnly&&!course.archived);
+  const archivedCourses=state.courses.filter(course=>!course.timetableOnly&&course.archived);
   q("#courseCountLabel").textContent = `${visibleCourses.length} aktive Kurse`;
   q("#courseGrid").innerHTML = visibleCourses.map(c => {
     const studentCount = (state.rosters[c.rosterId] || []).length;
@@ -325,7 +333,9 @@ function renderCourses() {
       <div class="course-card-actions"><button data-open-course="${c.id}">Noten öffnen</button><button data-manage-course="${c.id}">Verwalten</button></div>
     </article>`;
   }).join("");
-  const selectable = state.courses.filter(c=>!c.organizationOnly);
+  q("#archivedCourseSection").classList.toggle("hidden",archivedCourses.length===0);
+  q("#archivedCourseList").innerHTML=archivedCourses.map(course=>`<button data-restore-course="${course.id}"><span>${escapeHtml(course.name)} · ${escapeHtml(course.subject)}</span><small>Wiederherstellen</small></button>`).join("");
+  const selectable = activeCourses();
   if (!selectable.some(c => c.id === state.courseId)) state.courseId = selectable[0]?.id;
   q("#courseSelect").innerHTML = selectable.map(c => `<option value="${c.id}" ${c.id===state.courseId?"selected":""}>${c.name} · ${c.subject}</option>`).join("");
 }
@@ -408,7 +418,7 @@ function renderTimetable() {
       if(!baseItem && !change?.courseId) { html+='<div class="tt-cell"></div>'; continue; }
       const replacementCourse=change?.courseId?state.courses.find(candidate=>candidate.id===change.courseId):null;
       const item=replacementCourse?{courseId:replacementCourse.id,room:change.room,duration:baseItem?.duration||1}:baseItem;
-      const course=state.courses.find(c=>c.id===item?.courseId); if(!course) { html+='<div class="tt-cell"></div>'; continue; }
+      const course=state.courses.find(c=>c.id===item?.courseId); if(!course||course.archived) { html+='<div class="tt-cell"></div>'; continue; }
       const key=lessonKey(date,course.id,lessonRow); const plan=state.lessonPlans[key]||{}; const ids=assignmentCache[course.id]?.[key]||[]; const series=state.seriesByCourse[course.id];
       const topics=ids.map(id=>series?.units.find(unit=>unit.id===id)?.title).filter(Boolean); const status=change?.kind==="cancel"?"canceled":(plan.status || (topics.length?"planned":"")); const book=homeworkDueFor(date,course.id,row);
       const doubleClass=item.duration===2?(continuation?"double-end":"double-start"):"";
@@ -417,7 +427,7 @@ function renderTimetable() {
     }
   });
   q("#timetableGrid").innerHTML=html;
-  const legendCourses=state.courses.filter(course=>state.timetable.some(item=>item?.courseId===course.id));
+  const legendCourses=state.courses.filter(course=>!course.archived&&state.timetable.some(item=>item?.courseId===course.id));
   q("#timetableLegend").innerHTML=legendCourses.map(course=>`<span><i style="background:${safeCourseColor(course)}"></i>${escapeHtml(course.name)} · ${escapeHtml(course.subject)}</span>`).join("");
 }
 
@@ -470,10 +480,12 @@ function newStudent(name) {
 
 function courseFormFields(course={}) {
   const isCourse = course.organization === "course";
+  const selectedColor=safeCourseColor(course);
   return `<div class="form-grid">
     <label class="form-field"><span>${isCourse ? "Jahrgang" : "Klasse/Lerngruppe"}</span><input id="courseNameInput" value="${escapeHtml(course.name || "")}" placeholder="z. B. ${isCourse ? "Q1" : "9b"}"></label>
     <label class="form-field"><span>Fach</span><input id="courseSubjectInput" value="${escapeHtml(course.subject || "")}" placeholder="z. B. Biologie"></label>
     <label class="form-field"><span>Raum</span><input id="courseRoomInput" value="${escapeHtml(course.room || "")}" placeholder="optional"></label>
+    <label class="form-field"><span>Farbe im Stundenplan</span><select id="courseColorInput" style="border-left:7px solid ${selectedColor}">${courseColorOptions(selectedColor)}</select></label>
     <label class="form-field ${isCourse ? "" : "hidden"}" id="courseTypeField"><span>Kursart</span><select id="courseTypeInput"><option ${course.courseType === "Grundkurs" ? "selected" : ""}>Grundkurs</option><option ${course.courseType === "Leistungskurs" ? "selected" : ""}>Leistungskurs</option></select></label>
     <label class="checkbox-field"><input type="checkbox" id="courseWrittenInput" ${course.written ? "checked" : ""}> Schriftliche Leistungen vorgesehen</label>
   </div>`;
@@ -485,7 +497,7 @@ function openCreateCourse() {
     <div class="form-grid">
       <label class="form-field full"><span>Organisationsform</span><select id="organizationInput"><option value="class">Sek I – Klassenverband</option><option value="course">Sek II – Kurssystem</option></select></label>
     </div>
-    <div id="newCourseFields">${courseFormFields({organization:"class",written:true})}</div>
+    <div id="newCourseFields">${courseFormFields({organization:"class",written:true,color:nextCourseColor()})}</div>
     <div class="form-note" id="organizationNote">Kurse derselben Klasse verwenden automatisch dieselbe SuS-Liste.</div>
     <div class="editor-section"><div class="editor-heading"><h4>SuS hinzufügen</h4><span class="soft-label">optional</span></div>
       <label class="form-field full"><span>Eine Person pro Zeile</span><textarea id="newCourseStudents" placeholder="Alex B.&#10;Kim M."></textarea></label>${studentImportControls()}
@@ -496,7 +508,7 @@ function openCreateCourse() {
 
 function refreshNewCourseFields() {
   const organization = q("#organizationInput").value;
-  q("#newCourseFields").innerHTML = courseFormFields({organization,written:true});
+  q("#newCourseFields").innerHTML = courseFormFields({organization,written:true,color:nextCourseColor()});
   q("#organizationNote").textContent = organization === "class" ? "Kurse derselben Klasse verwenden automatisch dieselbe SuS-Liste." : "Dieser Oberstufenkurs erhält eine eigene, unabhängige SuS-Liste.";
 }
 
@@ -537,7 +549,7 @@ function createCourseFromDialog() {
   } else rosterId = `course-${Date.now()}`;
   if (!state.rosters[rosterId]) state.rosters[rosterId] = [];
   addUniqueStudents(state.rosters[rosterId], [...parseStudentNames(q("#newCourseStudents").value),...pendingStudentImport]);
-  state.courses.push({ id, name, subject, room:q("#courseRoomInput").value.trim(), color:nextCourseColor(), organization, courseType:organization === "course" ? q("#courseTypeInput").value : undefined, rosterId, written:q("#courseWrittenInput").checked });
+  state.courses.push({ id, name, subject, room:q("#courseRoomInput").value.trim(), color:q("#courseColorInput").value, organization, courseType:organization === "course" ? q("#courseTypeInput").value : undefined, rosterId, written:q("#courseWrittenInput").checked });
   state.courseId = id; saveState(); q("#detailDialog").close(); renderCourses(); renderStudents(); showToast(`${name} · ${subject} wurde angelegt`);
 }
 
@@ -553,7 +565,7 @@ function openManageCourse(courseId) {
       <div class="student-editor-list">${students.length ? students.map((student,index)=>`<label class="student-editor-row"><span>${index+1}</span><input data-edit-student="${student.id}" value="${escapeHtml(student.name)}"></label>`).join("") : '<div class="student-empty">Noch keine SuS eingetragen</div>'}</div>
       <label class="form-field full" style="margin-top:12px"><span>Weitere Namen · eine Person pro Zeile</span><textarea id="additionalStudents" placeholder="Namen hier einfügen"></textarea></label>${studentImportControls()}
     </div>
-    <div class="dialog-actions"><button class="secondary-button close-dialog">Abbrechen</button><button class="primary-button" id="saveCourseChanges" data-course-id="${course.id}">Speichern</button></div></div>`;
+    <div class="dialog-actions"><button class="secondary-button" data-archive-course="${course.id}">Kurs archivieren</button><button class="text-button danger-text" data-delete-course="${course.id}">Endgültig löschen</button><button class="secondary-button close-dialog">Abbrechen</button><button class="primary-button" id="saveCourseChanges" data-course-id="${course.id}">Speichern</button></div></div>`;
   pendingStudentImport=[]; dialog.showModal();
 }
 
@@ -564,12 +576,42 @@ function saveCourseChanges(courseId) {
   else course.name = newName;
   course.subject = q("#courseSubjectInput").value.trim() || course.subject;
   course.room = q("#courseRoomInput").value.trim();
+  course.color = q("#courseColorInput").value;
   course.written = q("#courseWrittenInput").checked;
   if (course.organization === "course") course.courseType = q("#courseTypeInput").value;
   const students = state.rosters[course.rosterId];
   qa("[data-edit-student]").forEach(input => { const student=students.find(s=>s.id===Number(input.dataset.editStudent)); if (student && input.value.trim()) student.name=input.value.trim(); });
   addUniqueStudents(students, [...parseStudentNames(q("#additionalStudents").value),...pendingStudentImport]);
   saveState(); q("#detailDialog").close(); renderCourses(); renderStudents(); showToast("Kurs und SuS-Liste aktualisiert");
+}
+
+function archiveCourse(courseId) {
+  if(activeCourses().length===1) { showToast("Der letzte aktive Kurs kann nicht archiviert werden"); return; }
+  const course=state.courses.find(candidate=>candidate.id===courseId); course.archived=true;
+  if(state.courseId===courseId) state.courseId=activeCourses()[0]?.id;
+  saveState(); q("#detailDialog").close(); renderAll(); showToast(`${course.name} · ${course.subject} archiviert`);
+}
+
+function restoreCourse(courseId) {
+  const course=state.courses.find(candidate=>candidate.id===courseId); course.archived=false; state.courseId=courseId;
+  saveState(); renderAll(); showToast(`${course.name} · ${course.subject} wiederhergestellt`);
+}
+
+function deleteCourse(courseId) {
+  if(activeCourses().length===1 && !state.courses.find(course=>course.id===courseId)?.archived) { showToast("Der letzte aktive Kurs kann nicht gelöscht werden"); return; }
+  const course=state.courses.find(candidate=>candidate.id===courseId); if(!course) return;
+  Object.keys(state.scheduleChanges).forEach(key=>{ const [date,row]=key.split("|"); const base=baseScheduleAt(date,Number(row)); if(state.scheduleChanges[key].courseId===courseId||base.item?.courseId===courseId) delete state.scheduleChanges[key]; });
+  state.timetable.forEach((item,index)=>{ if(item?.courseId!==courseId) return; state.timetable[index]=null; if(item.duration===2) state.timetable[index+5]=null; });
+  Object.entries(state.lessonPlans).forEach(([key,plan])=>{ if(plan.courseId===courseId||key.split("|")[1]===courseId) delete state.lessonPlans[key]; });
+  Object.entries(state.attendance).forEach(([key,entry])=>{ if(entry.courseId===courseId) delete state.attendance[key]; });
+  Object.keys(state.finalOverrides).forEach(key=>{ if(key.includes(`-${courseId}-`)||key.startsWith(`${courseId}-`)) delete state.finalOverrides[key]; });
+  Object.keys(state.excused).forEach(key=>{ if(key.startsWith(`${courseId}-`)) delete state.excused[key]; });
+  delete state.seriesByCourse[courseId];
+  state.archives.forEach(archive=>{ archive.courses=(archive.courses||[]).filter(candidate=>candidate.id!==courseId); });
+  state.courses=state.courses.filter(candidate=>candidate.id!==courseId);
+  if(!state.courses.some(candidate=>candidate.rosterId===course.rosterId)) delete state.rosters[course.rosterId];
+  if(state.courseId===courseId) state.courseId=activeCourses()[0]?.id;
+  saveState(); q("#detailDialog").close(); renderAll(); showToast(`${course.name} · ${course.subject} endgültig gelöscht`);
 }
 
 function seriesRow(unit={}, index=0) {
@@ -686,7 +728,7 @@ function openTimetableEditor(editIndex=null) {
   dialog.innerHTML=`<div class="dialog-inner"><div class="dialog-head"><div><span class="soft-label">Wochenvorlage</span><h3>${editing?"Unterricht ändern":"Alle Stunden eines Kurses"}</h3></div><button class="close-dialog">×</button></div>
     <div class="form-note">${editing?"Diese Angabe wiederholt sich jede Woche.":"Kurs und Raum nur einmal auswählen, danach alle wöchentlichen Unterrichtszeiten ergänzen."} Planung, Status und Hausaufgaben bleiben bei der einzelnen Stunde.</div>
     <div class="form-grid timetable-form">
-      <label class="form-field full"><span>Kurs</span><select id="timetableCourseInput">${state.courses.map(course=>`<option value="${course.id}" ${course.id===selectedCourse.id?"selected":""}>${escapeHtml(course.name)} · ${escapeHtml(course.subject)}</option>`).join("")}</select></label>
+      <label class="form-field full"><span>Kurs</span><select id="timetableCourseInput">${state.courses.filter(course=>!course.archived).map(course=>`<option value="${course.id}" ${course.id===selectedCourse.id?"selected":""}>${escapeHtml(course.name)} · ${escapeHtml(course.subject)}</option>`).join("")}</select></label>
       <label class="form-field full"><span>Raum</span><input id="timetableRoomInput" value="${escapeHtml(existing?.room ?? selectedCourse.room ?? "")}" placeholder="optional"></label>
       ${editing?`<label class="form-field"><span>Wochentag</span><select id="timetableDayInput">${timetableDays.map((day,index)=>`<option value="${index}" ${index===col?"selected":""}>${day}</option>`).join("")}</select></label>
       <label class="form-field"><span>Beginn</span><select id="timetableRowInput">${timetableTimes.map((time,index)=>`<option value="${index}" ${index===row?"selected":""}>${time.label}. Stunde · ${time.time}</option>`).join("")}</select></label>
@@ -760,7 +802,7 @@ function restoreChangeLessonStatus(key,change) {
 
 function openScheduleChangeDialog(editKey=null) {
   const firstLessonIndex=state.timetable.findIndex(item=>item?.courseId); const firstLessonRow=Math.floor(firstLessonIndex/5); const firstLessonDate=dateKey(addDays(displayedMonday(),firstLessonIndex%5));
-  const existingGroup=editKey?scheduleChangeGroup(editKey):null; const existing=existingGroup?.change; const [savedDate,savedRow]=editKey?existingGroup.key.split("|"):[firstLessonDate,String(firstLessonRow)]; const row=Number(savedRow); const rowTo=existing?.rangeTo??row; const rowFrom=existing?.rangeFrom??row; const base=baseScheduleAt(savedDate,rowFrom); const selectedCourseId=existing?.courseId||base.item?.courseId||state.courses.find(course=>!course.organizationOnly)?.id||state.courses[0].id;
+  const existingGroup=editKey?scheduleChangeGroup(editKey):null; const existing=existingGroup?.change; const [savedDate,savedRow]=editKey?existingGroup.key.split("|"):[firstLessonDate,String(firstLessonRow)]; const row=Number(savedRow); const rowTo=existing?.rangeTo??row; const rowFrom=existing?.rangeFrom??row; const base=baseScheduleAt(savedDate,rowFrom); const selectedCourseId=existing?.courseId||base.item?.courseId||state.courses.find(course=>!course.organizationOnly&&!course.archived)?.id||state.courses.find(course=>!course.archived)?.id;
   const entries=scheduleChangeGroups().map(group=>`<button data-edit-schedule-change="${group.key}"><span>${escapeHtml(scheduleChangeLabel(group.change,group.key))}</span><small>Bearbeiten</small></button>`).join("");
   const dialog=q("#detailDialog");
   dialog.innerHTML=`<div class="dialog-inner"><div class="dialog-head"><div><span class="soft-label">Einmalige Abweichung</span><h3>${existing?"Änderung bearbeiten":"Änderung eintragen"}</h3></div><button class="close-dialog">×</button></div>
@@ -770,7 +812,7 @@ function openScheduleChangeDialog(editKey=null) {
       <label class="form-field"><span>Von Stunde</span><select id="scheduleChangeRowFrom">${timetableTimes.map((time,index)=>`<option value="${index}" ${index===rowFrom?"selected":""}>${time.label}. Stunde · ${time.time}</option>`).join("")}</select></label>
       <label class="form-field"><span>Bis Stunde</span><select id="scheduleChangeRowTo">${timetableTimes.map((time,index)=>`<option value="${index}" ${index===rowTo?"selected":""}>${time.label}. Stunde</option>`).join("")}</select></label>
       <label class="form-field full"><span>Art der Änderung</span><select id="scheduleChangeType"><option value="cancel" ${existing?.kind==="cancel"?"selected":""}>Unterricht fällt aus</option><option value="room" ${existing?.kind==="room"?"selected":""}>Einmaliger Raumwechsel</option><option value="replacement" ${existing?.kind==="replacement"?"selected":""}>Vertretung / zusätzlicher Unterricht</option></select></label>
-      <label class="form-field full change-course-field"><span>Kurs</span><select id="scheduleChangeCourse">${state.courses.map(course=>`<option value="${course.id}" ${course.id===selectedCourseId?"selected":""}>${escapeHtml(course.name)} · ${escapeHtml(course.subject)}</option>`).join("")}</select></label>
+      <label class="form-field full change-course-field"><span>Kurs</span><select id="scheduleChangeCourse">${state.courses.filter(course=>!course.archived).map(course=>`<option value="${course.id}" ${course.id===selectedCourseId?"selected":""}>${escapeHtml(course.name)} · ${escapeHtml(course.subject)}</option>`).join("")}</select></label>
       <label class="form-field full change-room-field"><span>Raum</span><input id="scheduleChangeRoom" value="${escapeHtml(existing?.room ?? base.item?.room ?? "")}" placeholder="z. B. R 2"></label>
     </div>
     ${!existing&&entries?`<div class="editor-section"><div class="editor-heading"><h4>Gespeicherte Änderungen</h4><span class="soft-label">${scheduleChangeGroups().length}</span></div><div class="timetable-entry-list">${entries}</div></div>`:""}
@@ -870,6 +912,12 @@ function initEvents() {
     if(targetButton) switchView(targetButton.dataset.viewTarget);
     const manageCourse = event.target.closest("[data-manage-course]");
     if(manageCourse) { openManageCourse(manageCourse.dataset.manageCourse); return; }
+    const restoreCourseButton=event.target.closest("[data-restore-course]");
+    if(restoreCourseButton) { restoreCourse(restoreCourseButton.dataset.restoreCourse); return; }
+    const archiveCourseButton=event.target.closest("[data-archive-course]");
+    if(archiveCourseButton) { archiveCourse(archiveCourseButton.dataset.archiveCourse); return; }
+    const deleteCourseButton=event.target.closest("[data-delete-course]");
+    if(deleteCourseButton) { if(deleteCourseButton.dataset.confirmDelete!=="true") { deleteCourseButton.dataset.confirmDelete="true"; deleteCourseButton.textContent="Wirklich endgültig löschen?"; return; } deleteCourse(deleteCourseButton.dataset.deleteCourse); return; }
     const courseButton = event.target.closest("[data-open-course]");
     if(courseButton) { state.courseId = courseButton.dataset.openCourse; saveState(); renderCourses(); switchView("grades"); renderStudents(); return; }
     if(event.target.closest("#addCourse")) { openCreateCourse(); return; }
@@ -943,6 +991,7 @@ function initEvents() {
 
   q("#detailDialog").addEventListener("change", e => {
     if(e.target.id === "organizationInput") refreshNewCourseFields();
+    if(e.target.id === "courseColorInput") e.target.style.borderLeftColor=e.target.value;
     if(e.target.id === "timetableCourseInput") { const course=state.courses.find(candidate=>candidate.id===e.target.value); q("#timetableRoomInput").value=course?.room||""; }
     if(["scheduleChangeDate","scheduleChangeRowFrom","scheduleChangeRowTo","scheduleChangeType"].includes(e.target.id)) syncScheduleChangeDialog();
     if(e.target.id==="scheduleChangeCourse" && q("#scheduleChangeType")?.value==="replacement") { const course=state.courses.find(candidate=>candidate.id===e.target.value); q("#scheduleChangeRoom").value=course?.room||""; }
