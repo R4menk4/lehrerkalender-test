@@ -630,7 +630,7 @@ function openSeriesDialog(courseId=null) {
     <div class="form-note">Nur Reihenfolge und Stundenumfang festlegen. Die Verteilung auf deine Unterrichtstermine erfolgt automatisch.</div>
     <label class="form-field" style="margin-top:14px"><span>Startdatum der ersten UE</span><input type="date" id="seriesStartDate" value="${series.startDate}"></label>
     <div class="editor-section"><div class="editor-heading"><h4>Unterrichtseinheiten</h4><span class="soft-label">Stunden flexibel verteilbar</span></div><div class="series-list" id="seriesList">${series.units.length?series.units.map(seriesRow).join(""):seriesRow({},0)}</div><button class="secondary-button series-add" id="addSeriesUnit">＋ UE hinzufügen</button></div>
-    <div class="dialog-actions"><button class="secondary-button close-dialog">Abbrechen</button><button class="primary-button" id="saveSeries" data-course-id="${course.id}">Speichern</button></div></div>`;
+    <div class="dialog-actions">${series.units.length?`<button class="text-button danger-text" data-delete-series="${course.id}">Unterrichtsreihe löschen</button>`:""}<button class="secondary-button close-dialog">Abbrechen</button><button class="primary-button" id="saveSeries" data-course-id="${course.id}">Speichern</button></div></div>`;
   if(!dialog.open) dialog.showModal();
 }
 
@@ -642,6 +642,15 @@ function saveSeries(courseId) {
   const units=qa(".series-unit-row").map((row,index)=>({id:row.dataset.unitId||`${courseId}-u-${Date.now()}-${index}`,title:q(".series-title",row).value.trim(),hours:Math.max(1,Number(q(".series-hours",row).value)||1)})).filter(unit=>unit.title);
   if(!units.length) { showToast("Bitte mindestens eine UE eintragen"); return; }
   state.seriesByCourse[courseId]={startDate:q("#seriesStartDate").value||dateKey(displayedMonday()),units}; saveState(); q("#detailDialog").close(); renderTimetable(); showToast("Unterrichtsreihe wurde verteilt");
+}
+
+function deleteSeries(courseId) {
+  delete state.seriesByCourse[courseId];
+  Object.entries(state.lessonPlans).forEach(([key,plan])=>{
+    if(plan.courseId!==courseId && key.split("|")[1]!==courseId) return;
+    delete plan.manualAllocations;
+  });
+  saveState(); q("#detailDialog").close(); renderTimetable(); showToast("Unterrichtsreihe und UE-Zuordnungen gelöscht");
 }
 
 function nextCourseDate(courseId, afterDate) {
@@ -937,6 +946,8 @@ function initEvents() {
     if(event.target.closest("#addSeriesUnit")) { addSeriesUnitRow(); return; }
     const saveSeriesButton=event.target.closest("#saveSeries");
     if(saveSeriesButton) { saveSeries(saveSeriesButton.dataset.courseId); return; }
+    const deleteSeriesButton=event.target.closest("[data-delete-series]");
+    if(deleteSeriesButton) { if(deleteSeriesButton.dataset.confirmDelete!=="true") { deleteSeriesButton.dataset.confirmDelete="true"; deleteSeriesButton.textContent="Wirklich Unterrichtsreihe löschen?"; return; } deleteSeries(deleteSeriesButton.dataset.deleteSeries); return; }
     const statusButton=event.target.closest("#lessonStatusControl [data-status]");
     if(statusButton) { q("#detailDialog").dataset.lessonStatus=statusButton.dataset.status; qa("#lessonStatusControl button").forEach(button=>button.classList.toggle("active",button===statusButton)); return; }
     const saveLessonButton=event.target.closest("#saveLessonPlan");
