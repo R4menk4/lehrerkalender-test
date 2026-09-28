@@ -370,7 +370,7 @@ function buildAssignments(courseId) {
   const remaining=new Map(series.units.map(unit=>[unit.id,Number(unit.hours)])); const assignments={};
   for(const occurrence of scheduledOccurrences(courseId,series.startDate)) {
     const saved=state.lessonPlans[occurrence.key] || {};
-    if(saved.status==="canceled" || saved.status==="unplanned") { assignments[occurrence.key]=[]; continue; }
+    if(saved.status==="canceled") { assignments[occurrence.key]=[]; continue; }
     if(saved.manualAllocations?.length) {
       const selected=saved.manualAllocations.filter(Boolean);
       assignments[occurrence.key]=selected;
@@ -420,7 +420,7 @@ function renderTimetable() {
       const item=replacementCourse?{courseId:replacementCourse.id,room:change.room,duration:baseItem?.duration||1}:baseItem;
       const course=state.courses.find(c=>c.id===item?.courseId); if(!course||course.archived) { html+='<div class="tt-cell"></div>'; continue; }
       const key=lessonKey(date,course.id,lessonRow); const plan=state.lessonPlans[key]||{}; const ids=assignmentCache[course.id]?.[key]||[]; const series=state.seriesByCourse[course.id];
-      const topics=ids.map(id=>series?.units.find(unit=>unit.id===id)?.title).filter(Boolean); const status=change?.kind==="cancel"?"canceled":(plan.status || (topics.length?"planned":"")); const book=homeworkDueFor(date,course.id,row);
+      const topics=ids.map(id=>series?.units.find(unit=>unit.id===id)?.title).filter(Boolean); const status=change?.kind==="cancel"?"canceled":(plan.status || ""); const book=homeworkDueFor(date,course.id,row);
       const doubleClass=item.duration===2?(continuation?"double-end":"double-start"):"";
       const shownRoom=change?.kind==="room"?change.room:(item.room ?? course.room ?? ""); const changeLabel=change?.kind==="cancel"?"Ausfall":change?.kind==="room"?`Raum → ${escapeHtml(change.room)}`:change?.kind==="replacement"?"Vertretung / zusätzlich":"";
       html+=`<div class="tt-cell lesson course-tone ${status} ${doubleClass} ${change?"has-change":""}" style="--lesson-color:${safeCourseColor(course)}" data-lesson-key="${key}" data-course-id="${course.id}" data-row="${lessonRow}" data-duration="${item.duration||1}" data-date="${dateString}">${continuation?`<span class="double-continuation">Fortsetzung · Doppelstunde</span>`:`<b>${course.name} · ${course.subject}</b><span>${escapeHtml(shownRoom)} · ${(item.duration||1)}×</span>${changeLabel?`<span class="change-badge">${changeLabel}</span>`:""}${topics.length?`<div class="lesson-topics">${topics.map(topic=>`<span class="topic-segment">${escapeHtml(topic)}</span>`).join("")}</div>`:""}<span class="lesson-markers">${book?'<i title="Hausaufgabe fällig">📖</i>':""}${status==="done"?'<i class="done-check">✓</i>':""}</span>`}</div>`;
@@ -668,12 +668,12 @@ function openLessonDialog(cell) {
     <div class="homework-block"><div class="editor-heading"><h4>Hausaufgabe</h4><span class="soft-label">optional · nur diese Stunde</span></div><label class="form-field"><span>Aufgabe</span><input id="homeworkText" value="${escapeHtml(saved.homework||"")}" placeholder="z. B. Arbeitsblatt beenden"></label><label class="form-field" style="margin-top:10px"><span>Fällig am</span><input type="date" id="homeworkDue" value="${due}"></label></div>
     <div class="dialog-actions">${course.organizationOnly?"":`<button class="secondary-button lesson-grade-action" data-open-lesson-grades data-lesson-key="${key}" data-course-id="${courseId}" data-date="${date}" data-duration="${duration}">Mitarbeit erfassen</button>`}<button class="secondary-button close-dialog">Abbrechen</button><button class="primary-button" id="saveLessonPlan" data-lesson-key="${key}" data-course-id="${courseId}">Speichern</button></div></div>`;
   qa(".lesson-unit-select",dialog).forEach((select,index)=>{ select.value=selected[index]||""; });
-  const status=saved.status||(automatic.length?"planned":"unplanned"); qa("#lessonStatusControl button",dialog).forEach(button=>button.classList.toggle("active",button.dataset.status===status)); dialog.dataset.lessonStatus=status; dialog.showModal();
+  const status=saved.status||"unplanned"; qa("#lessonStatusControl button",dialog).forEach(button=>button.classList.toggle("active",button.dataset.status===status)); dialog.dataset.lessonStatus=status; dialog.showModal();
 }
 
 function saveLessonPlan(button,{close=true,notify=true}={}) {
   const dialog=q("#detailDialog"); const key=button.dataset.lessonKey; const allocations=qa(".lesson-unit-select",dialog).map(select=>select.value).filter(Boolean); const homework=q("#homeworkText").value.trim();
-  state.lessonPlans[key]={...(state.lessonPlans[key]||{}),courseId:button.dataset.courseId,status:dialog.dataset.lessonStatus||"planned",manualAllocations:allocations,homework,homeworkDue:homework?q("#homeworkDue").value:""}; saveState(); if(close) dialog.close(); renderTimetable(); if(notify) showToast("Unterrichtsstunde gespeichert");
+  state.lessonPlans[key]={...(state.lessonPlans[key]||{}),courseId:button.dataset.courseId,status:dialog.dataset.lessonStatus||"unplanned",manualAllocations:allocations,homework,homeworkDue:homework?q("#homeworkDue").value:""}; saveState(); if(close) dialog.close(); renderTimetable(); if(notify) showToast("Unterrichtsstunde gespeichert");
 }
 
 function lessonAttendanceKey(lessonKeyValue,studentId) { return `${lessonKeyValue}|${studentId}`; }
