@@ -22,6 +22,7 @@ let activeWeight = 2;
 let activeEntryArea = "lesson";
 let activeWrittenType = "Klausur";
 let expandedStudent = null;
+let draggedSeriesRow = null;
 
 function defaultState() {
   const rosters = {};
@@ -634,27 +635,46 @@ function deleteCourse(courseId) {
 }
 
 function seriesRow(unit={}, index=0) {
-  return `<div class="series-unit-row" data-unit-id="${unit.id||""}"><span>${index+1}</span><input class="series-title" value="${escapeHtml(unit.title||"")}" placeholder="Bezeichnung der UE"><input class="series-hours" type="number" min="1" max="30" value="${unit.hours||1}" aria-label="Stundenanzahl"></div>`;
+  return `<div class="series-unit-row" data-unit-id="${unit.id||""}"><button type="button" class="series-drag-handle" draggable="true" aria-label="${index+1}. UE verschieben" title="Ziehen zum Verschieben"><span class="series-position">${index+1}</span><i>⠿</i></button><input class="series-title" value="${escapeHtml(unit.title||"")}" placeholder="Bezeichnung der UE"><input class="series-hours" type="number" min="1" max="30" value="${unit.hours||1}" aria-label="Stundenanzahl"><div class="series-move-buttons"><button type="button" data-move-series-unit="up" aria-label="UE nach oben verschieben">↑</button><button type="button" data-move-series-unit="down" aria-label="UE nach unten verschieben">↓</button></div></div>`;
+}
+
+function renumberSeriesRows() {
+  const rows=qa(".series-unit-row");
+  rows.forEach((row,index)=>{
+    q(".series-position",row).textContent=index+1; q(".series-drag-handle",row).setAttribute("aria-label",`${index+1}. UE verschieben`);
+    q('[data-move-series-unit="up"]',row).disabled=index===0; q('[data-move-series-unit="down"]',row).disabled=index===rows.length-1;
+  });
+}
+
+function moveSeriesUnit(button) {
+  const row=button.closest(".series-unit-row"); const direction=button.dataset.moveSeriesUnit;
+  if(direction==="up"&&row.previousElementSibling) row.parentElement.insertBefore(row,row.previousElementSibling);
+  if(direction==="down"&&row.nextElementSibling) row.parentElement.insertBefore(row.nextElementSibling,row);
+  renumberSeriesRows();
 }
 
 function openSeriesDialog(courseId=null) {
   const course=courseId ? state.courses.find(candidate=>candidate.id===courseId) : currentCourse(); const series=state.seriesByCourse[course.id] || {startDate:dateKey(displayedMonday()),units:[]}; const dialog=q("#detailDialog");
   dialog.innerHTML=`<div class="dialog-inner"><div class="dialog-head"><div><span class="soft-label">${escapeHtml(course.name)} · ${escapeHtml(course.subject)}</span><h3>Unterrichtsreihe</h3></div><button class="close-dialog">×</button></div>
-    <div class="form-note">Nur Reihenfolge und Stundenumfang festlegen. Die Verteilung auf deine Unterrichtstermine erfolgt automatisch.</div>
+    <div class="form-note">UEs am Griff ziehen oder mit ↑/↓ verschieben. Beim Speichern werden die heutige und alle folgenden Stunden automatisch neu verteilt; vergangene Stunden bleiben unverändert.</div>
     <label class="form-field" style="margin-top:14px"><span>Startdatum der ersten UE</span><input type="date" id="seriesStartDate" value="${series.startDate}"></label>
     <div class="editor-section"><div class="editor-heading"><h4>Unterrichtseinheiten</h4><span class="soft-label">Stunden flexibel verteilbar</span></div><div class="series-list" id="seriesList">${series.units.length?series.units.map(seriesRow).join(""):seriesRow({},0)}</div><button class="secondary-button series-add" id="addSeriesUnit">＋ UE hinzufügen</button></div>
     <div class="dialog-actions">${series.units.length?`<button class="text-button danger-text" data-delete-series="${course.id}">Unterrichtsreihe löschen</button>`:""}<button class="secondary-button close-dialog">Abbrechen</button><button class="primary-button" id="saveSeries" data-course-id="${course.id}">Speichern</button></div></div>`;
-  if(!dialog.open) dialog.showModal();
+  renumberSeriesRows(); if(!dialog.open) dialog.showModal();
 }
 
 function addSeriesUnitRow() {
-  const list=q("#seriesList"); list.insertAdjacentHTML("beforeend",seriesRow({},qa(".series-unit-row",list).length));
+  const list=q("#seriesList"); list.insertAdjacentHTML("beforeend",seriesRow({},qa(".series-unit-row",list).length)); renumberSeriesRows();
 }
 
 function saveSeries(courseId) {
   const units=qa(".series-unit-row").map((row,index)=>({id:row.dataset.unitId||`${courseId}-u-${Date.now()}-${index}`,title:q(".series-title",row).value.trim(),hours:Math.max(1,Number(q(".series-hours",row).value)||1)})).filter(unit=>unit.title);
   if(!units.length) { showToast("Bitte mindestens eine UE eintragen"); return; }
-  state.seriesByCourse[courseId]={startDate:q("#seriesStartDate").value||dateKey(displayedMonday()),units}; saveState(); q("#detailDialog").close(); renderTimetable(); showToast("Unterrichtsreihe wurde verteilt");
+  const startDate=q("#seriesStartDate").value||dateKey(displayedMonday()); const previous=state.seriesByCourse[courseId];
+  const previousShape=JSON.stringify((previous?.units||[]).map(unit=>[unit.id,unit.title,Number(unit.hours)])); const nextShape=JSON.stringify(units.map(unit=>[unit.id,unit.title,Number(unit.hours)])); const structureChanged=!previous||previous.startDate!==startDate||previousShape!==nextShape;
+  state.seriesByCourse[courseId]={startDate,units};
+  if(structureChanged) Object.entries(state.lessonPlans).forEach(([key,plan])=>{ if((plan.courseId===courseId||key.split("|")[1]===courseId)&&key.split("|")[0]>=dateKey(today)) delete plan.manualAllocations; });
+  saveState(); q("#detailDialog").close(); renderTimetable(); showToast(structureChanged?"Reihe und folgende Stunden neu verteilt":"Unterrichtsreihe gespeichert");
 }
 
 function deleteSeries(courseId) {
@@ -965,6 +985,8 @@ function initEvents() {
     const openSeriesCourseButton=event.target.closest("[data-open-series-course]");
     if(openSeriesCourseButton) { openSeriesDialog(openSeriesCourseButton.dataset.openSeriesCourse); return; }
     if(event.target.closest("#addSeriesUnit")) { addSeriesUnitRow(); return; }
+    const moveSeriesUnitButton=event.target.closest("[data-move-series-unit]");
+    if(moveSeriesUnitButton) { moveSeriesUnit(moveSeriesUnitButton); return; }
     const saveSeriesButton=event.target.closest("#saveSeries");
     if(saveSeriesButton) { saveSeries(saveSeriesButton.dataset.courseId); return; }
     const deleteSeriesButton=event.target.closest("[data-delete-series]");
@@ -1037,6 +1059,18 @@ function initEvents() {
     const history = event.target.closest("[data-show-history]"); if(history) { expandedStudent=Number(history.dataset.showHistory); closeDialog(history); renderStudents(); }
     const lesson = event.target.closest("[data-lesson-key]"); if(lesson) openLessonDialog(lesson);
   });
+
+  document.addEventListener("dragstart",event=>{
+    const handle=event.target.closest(".series-drag-handle"); if(!handle) return;
+    draggedSeriesRow=handle.closest(".series-unit-row"); draggedSeriesRow.classList.add("is-dragging"); event.dataTransfer.effectAllowed="move"; event.dataTransfer.setData("text/plain",draggedSeriesRow.dataset.unitId||"new");
+  });
+  document.addEventListener("dragover",event=>{
+    const target=event.target.closest(".series-unit-row"); if(!target||!draggedSeriesRow||target===draggedSeriesRow) return;
+    event.preventDefault(); event.dataTransfer.dropEffect="move"; const after=event.clientY>target.getBoundingClientRect().top+target.getBoundingClientRect().height/2;
+    target.parentElement.insertBefore(draggedSeriesRow,after?target.nextElementSibling:target); renumberSeriesRows();
+  });
+  document.addEventListener("drop",event=>{ if(!draggedSeriesRow) return; event.preventDefault(); renumberSeriesRows(); });
+  document.addEventListener("dragend",()=>{ draggedSeriesRow?.classList.remove("is-dragging"); draggedSeriesRow=null; renumberSeriesRows(); });
 
   q("#detailDialog").addEventListener("change", e => {
     if(e.target.id === "organizationInput") refreshNewCourseFields();
