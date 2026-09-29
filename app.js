@@ -26,7 +26,7 @@ let expandedStudent = null;
 function defaultState() {
   const rosters = {};
   defaultCourses.forEach(course => { if (!rosters[course.rosterId]) rosters[course.rosterId] = structuredClone(demoStudents); });
-  return normalizeAcademicData({ courseId: "beispielkurs", quarter: "Q1", courses: structuredClone(defaultCourses), rosters, tasksDone: [], finalOverrides: {}, excused: {}, weekOffset: 0, seriesByCourse: defaultSeries(), lessonPlans: {}, timetable: defaultTimetable(), scheduleChanges: {}, attendance: {}, archives: [], settings: defaultSettings(), scheduleSetupVersion: 1 });
+  return normalizeAcademicData({ courseId: "beispielkurs", quarter: "Q1", courses: structuredClone(defaultCourses), rosters, tasksDone: [], finalOverrides: {}, excused: {}, weekOffset: 0, seriesByCourse: defaultSeries(), lessonPlans: {}, lessonFlags: {}, timetable: defaultTimetable(), scheduleChanges: {}, attendance: {}, archives: [], settings: defaultSettings(), scheduleSetupVersion: 1, lessonStatusVersion: 1 });
 }
 
 function defaultSettings() {
@@ -66,6 +66,11 @@ function newGradeId() { return `grade-${Date.now()}-${Math.random().toString(36)
 
 function normalizeAcademicData(data) {
   data.archives ||= [];
+  data.lessonFlags ||= {};
+  if(data.lessonStatusVersion!==1) {
+    Object.values(data.lessonPlans||{}).forEach(plan=>{ if(plan.status==="done") plan.status="planned"; });
+    data.lessonStatusVersion=1;
+  }
   if(data.courseColorVersion!==1) {
     let colorIndex=0;
     (data.courses||[]).forEach(course=>{ course.color=course.organizationOnly?"#c19a52":coursePalette[colorIndex++%coursePalette.length]; });
@@ -99,6 +104,7 @@ function loadState() {
     if (!saved.lessonPlans) saved.lessonPlans = {};
     if (!saved.scheduleChanges) saved.scheduleChanges = {};
     if (!saved.attendance) saved.attendance = {};
+    if (!saved.lessonFlags) saved.lessonFlags = {};
     if (!saved.archives) saved.archives = [];
     saved.settings={...defaultSettings(),...(saved.settings||{})};
     const legacySchedule=!saved.timetable || saved.timetable.length===25;
@@ -258,9 +264,11 @@ function completePeriod(type) {
     state.quarter=state.quarter==="Q1"?"Q2":state.quarter==="Q2"?"Q3":"Q4";
   } else {
     state.settings.schoolYear=q("#nextSchoolYear")?.value.trim()||nextSchoolYear(state.settings.schoolYear); state.quarter="Q1";
-    Object.values(state.rosters).forEach(roster=>roster.forEach(student=>{student.previous=null;student.absences=0;})); state.lessonPlans={}; state.seriesByCourse={}; state.finalOverrides={}; state.excused={};
+    Object.values(state.rosters).forEach(roster=>roster.forEach(student=>{student.previous=null;student.absences=0;})); state.lessonPlans={}; state.seriesByCourse={}; state.lessonFlags={}; state.finalOverrides={}; state.excused={};
   }
-  Object.keys(state.attendance).forEach(key=>{ if(type==="year"||state.attendance[key].quarter===snapshot.quarter) delete state.attendance[key]; }); state.excused={}; state.settings.quarterEndDate=""; saveState(); q("#detailDialog").close(); renderAll(); showToast(`${snapshot.label} wurde archiviert`);
+  Object.keys(state.attendance).forEach(key=>{ if(type==="year"||state.attendance[key].quarter===snapshot.quarter) delete state.attendance[key]; });
+  Object.keys(state.lessonFlags).forEach(key=>{ if(type==="year"||state.lessonFlags[key].quarter===snapshot.quarter) delete state.lessonFlags[key]; });
+  state.excused={}; state.settings.quarterEndDate=""; saveState(); q("#detailDialog").close(); renderAll(); showToast(`${snapshot.label} wurde archiviert`);
 }
 
 function openArchive(id) {
@@ -406,6 +414,10 @@ function baseScheduleAt(dateString,row) {
 
 function scheduleChangeKey(dateString,row) { return `${dateString}|${row}`; }
 
+function lessonHasParticipation(course,lessonKeyValue) {
+  return (state.rosters[course.rosterId]||[]).some(student=>student.grades.some(grade=>grade.lessonKey===lessonKeyValue));
+}
+
 function renderTimetable() {
   const days=timetableDays; const monday=displayedMonday();
   const rangeEnd=addDays(monday,4); q("#timetableWeekLabel").textContent=`${new Intl.DateTimeFormat("de-DE",{day:"2-digit",month:"short"}).format(monday)} – ${new Intl.DateTimeFormat("de-DE",{day:"2-digit",month:"short",year:"numeric"}).format(rangeEnd)}`;
@@ -420,10 +432,10 @@ function renderTimetable() {
       const item=replacementCourse?{courseId:replacementCourse.id,room:change.room,duration:baseItem?.duration||1}:baseItem;
       const course=state.courses.find(c=>c.id===item?.courseId); if(!course||course.archived) { html+='<div class="tt-cell"></div>'; continue; }
       const key=lessonKey(date,course.id,lessonRow); const plan=state.lessonPlans[key]||{}; const ids=assignmentCache[course.id]?.[key]||[]; const series=state.seriesByCourse[course.id];
-      const topics=ids.map(id=>series?.units.find(unit=>unit.id===id)?.title).filter(Boolean); const status=change?.kind==="cancel"?"canceled":(plan.status || ""); const book=homeworkDueFor(date,course.id,row);
+      const topics=ids.map(id=>series?.units.find(unit=>unit.id===id)?.title).filter(Boolean); const status=change?.kind==="cancel"?"canceled":(plan.status || ""); const book=homeworkDueFor(date,course.id,row); const participationRecorded=lessonHasParticipation(course,key);
       const doubleClass=item.duration===2?(continuation?"double-end":"double-start"):"";
       const shownRoom=change?.kind==="room"?change.room:(item.room ?? course.room ?? ""); const changeLabel=change?.kind==="cancel"?"Ausfall":change?.kind==="room"?`Raum → ${escapeHtml(change.room)}`:change?.kind==="replacement"?"Vertretung / zusätzlich":"";
-      html+=`<div class="tt-cell lesson course-tone ${status} ${doubleClass} ${change?"has-change":""}" style="--lesson-color:${safeCourseColor(course)}" data-lesson-key="${key}" data-course-id="${course.id}" data-row="${lessonRow}" data-duration="${item.duration||1}" data-date="${dateString}">${continuation?`<span class="double-continuation">Fortsetzung · Doppelstunde</span>`:`<b>${course.name} · ${course.subject}</b><span>${escapeHtml(shownRoom)} · ${(item.duration||1)}×</span>${changeLabel?`<span class="change-badge">${changeLabel}</span>`:""}${topics.length?`<div class="lesson-topics">${topics.map(topic=>`<span class="topic-segment">${escapeHtml(topic)}</span>`).join("")}</div>`:""}<span class="lesson-markers">${book?'<i title="Hausaufgabe fällig">📖</i>':""}${status==="done"?'<i class="done-check">✓</i>':""}</span>`}</div>`;
+      html+=`<div class="tt-cell lesson course-tone ${status} ${doubleClass} ${change?"has-change":""}" style="--lesson-color:${safeCourseColor(course)}" data-lesson-key="${key}" data-course-id="${course.id}" data-row="${lessonRow}" data-duration="${item.duration||1}" data-date="${dateString}">${continuation?`<span class="double-continuation">Fortsetzung · Doppelstunde</span>`:`<b>${course.name} · ${course.subject}</b><span>${escapeHtml(shownRoom)} · ${(item.duration||1)}×</span>${changeLabel?`<span class="change-badge">${changeLabel}</span>`:""}${topics.length?`<div class="lesson-topics">${topics.map(topic=>`<span class="topic-segment">${escapeHtml(topic)}</span>`).join("")}</div>`:""}<span class="lesson-markers">${book?'<i title="Hausaufgabe fällig">📖</i>':""}${participationRecorded?'<i class="done-check" title="Mitarbeit erfasst">✓</i>':""}</span>`}</div>`;
     }
   });
   q("#timetableGrid").innerHTML=html;
@@ -610,6 +622,7 @@ function deleteCourse(courseId) {
   state.timetable.forEach((item,index)=>{ if(item?.courseId!==courseId) return; state.timetable[index]=null; if(item.duration===2) state.timetable[index+5]=null; });
   Object.entries(state.lessonPlans).forEach(([key,plan])=>{ if(plan.courseId===courseId||key.split("|")[1]===courseId) delete state.lessonPlans[key]; });
   Object.entries(state.attendance).forEach(([key,entry])=>{ if(entry.courseId===courseId) delete state.attendance[key]; });
+  Object.entries(state.lessonFlags).forEach(([key,entry])=>{ if(entry.courseId===courseId) delete state.lessonFlags[key]; });
   Object.keys(state.finalOverrides).forEach(key=>{ if(key.includes(`-${courseId}-`)||key.startsWith(`${courseId}-`)) delete state.finalOverrides[key]; });
   Object.keys(state.excused).forEach(key=>{ if(key.startsWith(`${courseId}-`)) delete state.excused[key]; });
   delete state.seriesByCourse[courseId];
@@ -663,12 +676,12 @@ function openLessonDialog(cell) {
   const slots=Array.from({length:duration},(_,index)=>`<label class="lesson-slot"><span>${duration===2?`${index+1}. Stunde`:"UE"}</span><select class="lesson-unit-select">${options}</select></label>`).join("");
   const due=saved.homeworkDue || (nextCourseDate(courseId,date)?dateKey(nextCourseDate(courseId,date)):""); const dialog=q("#detailDialog");
   dialog.innerHTML=`<div class="dialog-inner"><div class="dialog-head"><div><span class="soft-label">${new Intl.DateTimeFormat("de-DE",{weekday:"long",day:"2-digit",month:"long"}).format(new Date(`${date}T12:00:00`))}</span><h3>${escapeHtml(course.name)} · ${escapeHtml(course.subject)}</h3></div><button class="close-dialog">×</button></div>
-    <div class="lesson-plan-slots">${series?.units?.length?slots:`<div class="form-note">Für diesen Kurs ist noch keine Unterrichtsreihe angelegt.</div><button class="secondary-button" data-open-series-course="${courseId}">Unterrichtsreihe anlegen</button>`}</div>
-    <div class="control-group status-control"><span class="control-label">Status</span><div class="segmented" id="lessonStatusControl"><button data-status="unplanned">Ungeplant</button><button data-status="planned">Geplant</button><button data-status="done">Durchgeführt</button><button data-status="canceled">Ausgefallen</button></div></div>
+    <div class="lesson-plan-slots">${series?.units?.length?`${slots}<button class="secondary-button lesson-series-edit" data-open-series-course="${courseId}">Unterrichtsreihe bearbeiten</button>`:`<div class="form-note">Für diesen Kurs ist noch keine Unterrichtsreihe angelegt.</div><button class="secondary-button" data-open-series-course="${courseId}">Unterrichtsreihe anlegen</button>`}</div>
+    <div class="control-group status-control"><span class="control-label">Status</span><div class="segmented" id="lessonStatusControl"><button data-status="unplanned">Ungeplant</button><button data-status="planned">Geplant</button><button data-status="canceled">Ausgefallen</button></div></div>
     <div class="homework-block"><div class="editor-heading"><h4>Hausaufgabe</h4><span class="soft-label">optional · nur diese Stunde</span></div><label class="form-field"><span>Aufgabe</span><input id="homeworkText" value="${escapeHtml(saved.homework||"")}" placeholder="z. B. Arbeitsblatt beenden"></label><label class="form-field" style="margin-top:10px"><span>Fällig am</span><input type="date" id="homeworkDue" value="${due}"></label></div>
     <div class="dialog-actions">${course.organizationOnly?"":`<button class="secondary-button lesson-grade-action" data-open-lesson-grades data-lesson-key="${key}" data-course-id="${courseId}" data-date="${date}" data-duration="${duration}">Mitarbeit erfassen</button>`}<button class="secondary-button close-dialog">Abbrechen</button><button class="primary-button" id="saveLessonPlan" data-lesson-key="${key}" data-course-id="${courseId}">Speichern</button></div></div>`;
   qa(".lesson-unit-select",dialog).forEach((select,index)=>{ select.value=selected[index]||""; });
-  const status=saved.status||"unplanned"; qa("#lessonStatusControl button",dialog).forEach(button=>button.classList.toggle("active",button.dataset.status===status)); dialog.dataset.lessonStatus=status; dialog.showModal();
+  const status=saved.status==="done"?"planned":(saved.status||"unplanned"); qa("#lessonStatusControl button",dialog).forEach(button=>button.classList.toggle("active",button.dataset.status===status)); dialog.dataset.lessonStatus=status; dialog.showModal();
 }
 
 function saveLessonPlan(button,{close=true,notify=true}={}) {
@@ -682,9 +695,9 @@ function lessonGradeRows(courseId,lessonKeyValue,duration) {
   const course=state.courses.find(candidate=>candidate.id===courseId); const students=state.rosters[course.rosterId]||[];
   if(!students.length) return '<div class="student-empty">Für diesen Kurs sind noch keine SuS eingetragen.</div>';
   return students.map(student=>{
-    const grade=student.grades.find(entry=>entry.lessonKey===lessonKeyValue); const absent=state.attendance[lessonAttendanceKey(lessonKeyValue,student.id)];
+    const entryKey=lessonAttendanceKey(lessonKeyValue,student.id); const grade=student.grades.find(entry=>entry.lessonKey===lessonKeyValue); const absent=state.attendance[entryKey]; const flags=state.lessonFlags[entryKey]||{};
     const status=absent?`Abwesend · ${absent.hours} Fehlstunde${absent.hours===1?"":"n"}`:grade?`${labelCategory(grade.c)} · Note ${grade.v} · ${grade.w}×`:"Noch kein Eintrag";
-    return `<div class="lesson-grade-row ${absent?"is-absent":""}" data-lesson-student="${student.id}"><div class="lesson-grade-name"><b>${escapeHtml(student.name)}</b><small>${status}</small></div><div class="lesson-grade-buttons">${[1,2,3,4,5,6].map(note=>`<button class="${grade?.v===note?"active":""}" data-lesson-grade="${note}" data-student-id="${student.id}">${note}</button>`).join("")}<button class="absence-button ${absent?"active":""}" data-lesson-absent="${student.id}">${absent?"Anwesend":"Abw."}</button></div></div>`;
+    return `<div class="lesson-grade-row ${absent?"is-absent":""}" data-lesson-student="${student.id}"><div class="lesson-grade-name"><b>${escapeHtml(student.name)}</b><small>${status}</small></div><div class="lesson-grade-buttons">${[1,2,3,4,5,6].map(note=>`<button class="${grade?.v===note?"active":""}" data-lesson-grade="${note}" data-student-id="${student.id}">${note}</button>`).join("")}<button class="absence-button ${absent?"active":""}" data-lesson-absent="${student.id}">${absent?"Anwesend":"Abw."}</button><button class="lesson-flag-button ${flags.homework?"active":""}" data-lesson-flag="homework" data-student-id="${student.id}" title="Hausaufgaben vergessen">HA</button><button class="lesson-flag-button ${flags.materials?"active":""}" data-lesson-flag="materials" data-student-id="${student.id}" title="Materialien vergessen">Mat.</button></div></div>`;
   }).join("");
 }
 
@@ -702,12 +715,12 @@ function addLessonGrade(note,studentId) {
   const dialog=q("#detailDialog"); const course=state.courses.find(candidate=>candidate.id===dialog.dataset.gradeCourseId); const student=state.rosters[course.rosterId].find(candidate=>candidate.id===studentId); const key=dialog.dataset.gradeLessonKey; const duration=Number(dialog.dataset.gradeDuration); const attendanceKey=lessonAttendanceKey(key,studentId); const absent=state.attendance[attendanceKey];
   const existing=student.grades.find(entry=>entry.lessonKey===key); const category=dialog.dataset.gradeCategory||"oral";
   if(existing?.v===note && existing.c===category) {
-    student.grades=student.grades.filter(entry=>entry!==existing); saveState(); q("#lessonGradeRows").innerHTML=lessonGradeRows(course.id,key,duration); showToast(`Note für ${student.name} entfernt`); return;
+    student.grades=student.grades.filter(entry=>entry!==existing); saveState(); q("#lessonGradeRows").innerHTML=lessonGradeRows(course.id,key,duration); renderTimetable(); showToast(`Note für ${student.name} entfernt`); return;
   }
   if(absent) { student.absences=Math.max(0,student.absences-absent.hours); delete state.attendance[attendanceKey]; }
   const entry={id:existing?.id||newGradeId(),v:note,c:category,w:duration,lessonKey:key,date:key.split("|")[0],quarter:state.quarter,schoolYear:state.settings.schoolYear};
   if(existing) Object.assign(existing,entry); else student.grades.push(entry);
-  saveState(); q("#lessonGradeRows").innerHTML=lessonGradeRows(course.id,key,duration); showToast(`Note ${note} für ${student.name} gespeichert`);
+  saveState(); q("#lessonGradeRows").innerHTML=lessonGradeRows(course.id,key,duration); renderTimetable(); showToast(`Note ${note} für ${student.name} gespeichert`);
 }
 
 function toggleLessonAbsence(studentId) {
@@ -715,6 +728,14 @@ function toggleLessonAbsence(studentId) {
   if(absent) { student.absences=Math.max(0,student.absences-absent.hours); delete state.attendance[attendanceKey]; }
   else { state.attendance[attendanceKey]={hours:duration,courseId:course.id,studentId,date:key.split("|")[0],quarter:state.quarter,schoolYear:state.settings.schoolYear}; student.absences+=duration; student.grades=student.grades.filter(entry=>entry.lessonKey!==key); }
   saveState(); q("#lessonGradeRows").innerHTML=lessonGradeRows(course.id,key,duration); showToast(absent?`${student.name} wieder als anwesend markiert`:`${student.name}: ${duration} Fehlstunde${duration===1?"":"n"} erfasst`);
+}
+
+function toggleLessonFlag(kind,studentId) {
+  const dialog=q("#detailDialog"); const course=state.courses.find(candidate=>candidate.id===dialog.dataset.gradeCourseId); const student=state.rosters[course.rosterId].find(candidate=>candidate.id===studentId); const lessonKeyValue=dialog.dataset.gradeLessonKey; const key=lessonAttendanceKey(lessonKeyValue,studentId); const current=state.lessonFlags[key]||{courseId:course.id,studentId,date:lessonKeyValue.split("|")[0],quarter:state.quarter,schoolYear:state.settings.schoolYear};
+  current[kind]=!current[kind];
+  if(!current.homework&&!current.materials) delete state.lessonFlags[key]; else state.lessonFlags[key]=current;
+  saveState(); q("#lessonGradeRows").innerHTML=lessonGradeRows(course.id,lessonKeyValue,Number(dialog.dataset.gradeDuration));
+  const label=kind==="homework"?"Hausaufgaben":"Materialien"; showToast(`${student.name}: ${label} vergessen ${current[kind]?"vermerkt":"entfernt"}`);
 }
 
 function timetableEntryLabel(item, index) {
@@ -963,6 +984,8 @@ function initEvents() {
     if(lessonGradeButton) { addLessonGrade(Number(lessonGradeButton.dataset.lessonGrade),Number(lessonGradeButton.dataset.studentId)); return; }
     const lessonAbsentButton=event.target.closest("[data-lesson-absent]");
     if(lessonAbsentButton) { toggleLessonAbsence(Number(lessonAbsentButton.dataset.lessonAbsent)); return; }
+    const lessonFlagButton=event.target.closest("[data-lesson-flag]");
+    if(lessonFlagButton) { toggleLessonFlag(lessonFlagButton.dataset.lessonFlag,Number(lessonFlagButton.dataset.studentId)); return; }
     if(event.target.closest("#addException")) { openScheduleChangeDialog(); return; }
     const editScheduleChangeButton=event.target.closest("[data-edit-schedule-change]");
     if(editScheduleChangeButton) { openScheduleChangeDialog(editScheduleChangeButton.dataset.editScheduleChange); return; }
