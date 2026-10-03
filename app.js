@@ -191,6 +191,7 @@ function lessonsOnDate(date) {
   for(let row=0;row<timetableTimes.length;row++) {
     const raw=state.timetable[row*5+col]; if(raw?.continuesFrom!==undefined) continue;
     const change=state.scheduleChanges[scheduleChangeKey(dateString,row)];
+    if(change?.kind==="replacement" && change.title) { result.push({date:dateString,row,course:{name:change.title,subject:"Vertretung",color:"#c39b52",organizationOnly:true},room:change.room||"",duration:raw?.duration||1,canceled:false}); continue; }
     if(!raw?.courseId && !change?.courseId) continue;
     const courseId=change?.courseId || raw?.courseId; const course=state.courses.find(candidate=>candidate.id===courseId); if(!course||course.archived) continue;
     result.push({date:dateString,row,course,room:change?.room || raw?.room || course.room || "",duration:raw?.duration || 1,canceled:change?.kind==="cancel"});
@@ -384,8 +385,7 @@ function buildAssignments(courseId) {
       const selected=saved.manualAllocations.filter(Boolean);
       assignments[occurrence.key]=selected;
       selected.forEach(id=>remaining.set(id,Math.max(0,(remaining.get(id)||0)-1)));
-      const maxIndex=Math.max(...selected.map(id=>series.units.findIndex(unit=>unit.id===id)));
-      series.units.slice(0,maxIndex).forEach(unit=>remaining.set(unit.id,0));
+
       continue;
     }
     const slots=[];
@@ -428,14 +428,15 @@ function renderTimetable() {
     html+=`<div class="tt-time">${time.label}<small>${time.time}</small></div>`;
     for(let col=0;col<5;col++) {
       const date=addDays(monday,col); const dateString=dateKey(date); const rawItem=state.timetable[row*5+col]; const continuation=rawItem?.continuesFrom!==undefined; const baseItem=continuation?state.timetable[rawItem.continuesFrom]:rawItem; const lessonRow=continuation?Math.floor(rawItem.continuesFrom/5):row; const change=state.scheduleChanges[scheduleChangeKey(dateString,lessonRow)];
-      if(!baseItem && !change?.courseId) { html+='<div class="tt-cell"></div>'; continue; }
+      if(!baseItem && !change?.courseId && !change?.title) { html+='<div class="tt-cell"></div>'; continue; }
+      if(change?.kind==="replacement" && change.title) { html+=`<div class="tt-cell lesson course-tone ${baseItem?.duration===2?(continuation?"double-end":"double-start"):""}" style="--lesson-color:#c39b52" data-edit-schedule-change="${scheduleChangeKey(dateString,lessonRow)}"><b>${escapeHtml(change.title)}</b><span>${escapeHtml(change.room||"")}</span><span class="change-badge">Vertretung</span></div>`; continue; }
       const replacementCourse=change?.courseId?state.courses.find(candidate=>candidate.id===change.courseId):null;
       const item=replacementCourse?{courseId:replacementCourse.id,room:change.room,duration:baseItem?.duration||1}:baseItem;
       const course=state.courses.find(c=>c.id===item?.courseId); if(!course||course.archived) { html+='<div class="tt-cell"></div>'; continue; }
       const key=lessonKey(date,course.id,lessonRow); const plan=state.lessonPlans[key]||{}; const ids=assignmentCache[course.id]?.[key]||[]; const series=state.seriesByCourse[course.id];
-      const topics=ids.map(id=>series?.units.find(unit=>unit.id===id)?.title).filter(Boolean); const status=change?.kind==="cancel"?"canceled":(plan.status || ""); const book=homeworkDueFor(date,course.id,row); const participationRecorded=lessonHasParticipation(course,key);
+      const topics=ids.map(id=>series?.units.find(unit=>unit.id===id)?.title).filter(Boolean); const status=change?.kind==="cancel"?"canceled":change?.kind==="eva"?"eva":(plan.status || ""); const book=homeworkDueFor(date,course.id,row); const participationRecorded=status!=="eva"&&status!=="canceled"&&lessonHasParticipation(course,key);
       const doubleClass=item.duration===2?(continuation?"double-end":"double-start"):"";
-      const shownRoom=change?.kind==="room"?change.room:(item.room ?? course.room ?? ""); const changeLabel=change?.kind==="cancel"?"Ausfall":change?.kind==="room"?`Raum → ${escapeHtml(change.room)}`:change?.kind==="replacement"?"Vertretung / zusätzlich":"";
+      const shownRoom=change?.kind==="room"?change.room:(item.room ?? course.room ?? ""); const changeLabel=status==="eva"?"EVA · selbstständig":change?.kind==="cancel"?"Ausfall":change?.kind==="room"?`Raum → ${escapeHtml(change.room)}`:change?.kind==="replacement"?"Vertretung / zusätzlich":"";
       html+=`<div class="tt-cell lesson course-tone ${status} ${doubleClass} ${change?"has-change":""}" style="--lesson-color:${safeCourseColor(course)}" data-lesson-key="${key}" data-course-id="${course.id}" data-row="${lessonRow}" data-duration="${item.duration||1}" data-date="${dateString}">${continuation?`<span class="double-continuation">Fortsetzung · Doppelstunde</span>`:`<b>${course.name} · ${course.subject}</b><span>${escapeHtml(shownRoom)} · ${(item.duration||1)}×</span>${changeLabel?`<span class="change-badge">${changeLabel}</span>`:""}${topics.length?`<div class="lesson-topics">${topics.map(topic=>`<span class="topic-segment">${escapeHtml(topic)}</span>`).join("")}</div>`:""}<span class="lesson-markers">${book?'<i title="Hausaufgabe fällig">📖</i>':""}${participationRecorded?'<i class="done-check" title="Mitarbeit erfasst">✓</i>':""}</span>`}</div>`;
     }
   });
@@ -697,16 +698,29 @@ function openLessonDialog(cell) {
   const due=saved.homeworkDue || (nextCourseDate(courseId,date)?dateKey(nextCourseDate(courseId,date)):""); const dialog=q("#detailDialog");
   dialog.innerHTML=`<div class="dialog-inner"><div class="dialog-head"><div><span class="soft-label">${new Intl.DateTimeFormat("de-DE",{weekday:"long",day:"2-digit",month:"long"}).format(new Date(`${date}T12:00:00`))}</span><h3>${escapeHtml(course.name)} · ${escapeHtml(course.subject)}</h3></div><button class="close-dialog">×</button></div>
     <div class="lesson-plan-slots">${series?.units?.length?`${slots}<button class="secondary-button lesson-series-edit" data-open-series-course="${courseId}">Unterrichtsreihe bearbeiten</button>`:`<div class="form-note">Für diesen Kurs ist noch keine Unterrichtsreihe angelegt.</div><button class="secondary-button" data-open-series-course="${courseId}">Unterrichtsreihe anlegen</button>`}</div>
-    <div class="control-group status-control"><span class="control-label">Status</span><div class="segmented" id="lessonStatusControl"><button data-status="unplanned">Ungeplant</button><button data-status="planned">Geplant</button><button data-status="canceled">Ausgefallen</button></div></div>
+    <div class="control-group status-control"><span class="control-label">Status</span><div class="segmented" id="lessonStatusControl"><button data-status="unplanned">Ungeplant</button><button data-status="planned">Geplant</button><button data-status="canceled">Ausgefallen</button><button data-status="eva">EVA</button></div></div>
+    <label class="form-field eva-tasks-field" style="margin-top:12px"><span>EVA-Aufgaben · optional</span><textarea id="evaTasks" placeholder="Auftrag für die selbstständige Arbeit">${escapeHtml(saved.evaTasks||"")}</textarea></label>
     <div class="homework-block"><div class="editor-heading"><h4>Hausaufgabe</h4><span class="soft-label">optional · nur diese Stunde</span></div><label class="form-field"><span>Aufgabe</span><input id="homeworkText" value="${escapeHtml(saved.homework||"")}" placeholder="z. B. Arbeitsblatt beenden"></label><label class="form-field" style="margin-top:10px"><span>Fällig am</span><input type="date" id="homeworkDue" value="${due}"></label></div>
     <div class="dialog-actions">${course.organizationOnly?"":`<button class="secondary-button lesson-grade-action" data-open-lesson-grades data-lesson-key="${key}" data-course-id="${courseId}" data-date="${date}" data-duration="${duration}">Mitarbeit erfassen</button>`}<button class="secondary-button close-dialog">Abbrechen</button><button class="primary-button" id="saveLessonPlan" data-lesson-key="${key}" data-course-id="${courseId}">Speichern</button></div></div>`;
   qa(".lesson-unit-select",dialog).forEach((select,index)=>{ select.value=selected[index]||""; });
-  const status=saved.status==="done"?"planned":(saved.status||"unplanned"); qa("#lessonStatusControl button",dialog).forEach(button=>button.classList.toggle("active",button.dataset.status===status)); dialog.dataset.lessonStatus=status; dialog.showModal();
+  const status=saved.status==="done"?"planned":(saved.status||"unplanned"); qa("#lessonStatusControl button",dialog).forEach(button=>button.classList.toggle("active",button.dataset.status===status)); dialog.dataset.lessonStatus=status; syncLessonStatus(); dialog.showModal();
+}
+
+function syncLessonStatus() {
+  const status=q("#detailDialog").dataset.lessonStatus;
+  q(".eva-tasks-field")?.classList.toggle("hidden",status!=="eva");
+  const button=q("[data-open-lesson-grades]"); if(button) button.disabled=["eva","canceled"].includes(status);
 }
 
 function saveLessonPlan(button,{close=true,notify=true}={}) {
   const dialog=q("#detailDialog"); const key=button.dataset.lessonKey; const allocations=qa(".lesson-unit-select",dialog).map(select=>select.value).filter(Boolean); const homework=q("#homeworkText").value.trim();
-  state.lessonPlans[key]={...(state.lessonPlans[key]||{}),courseId:button.dataset.courseId,status:dialog.dataset.lessonStatus||"unplanned",manualAllocations:allocations,homework,homeworkDue:homework?q("#homeworkDue").value:""}; saveState(); if(close) dialog.close(); renderTimetable(); if(notify) showToast("Unterrichtsstunde gespeichert");
+  const changeKey=scheduleChangeKey(key.split("|")[0],Number(key.split("|")[2]));
+  const change=state.scheduleChanges[changeKey];
+  if(change && ["cancel","eva"].includes(change.kind)) {
+    if(["eva","canceled"].includes(dialog.dataset.lessonStatus)) { change.kind=dialog.dataset.lessonStatus==="eva"?"eva":"cancel"; change.evaTasks=q("#evaTasks").value.trim(); }
+    else delete state.scheduleChanges[changeKey];
+  }
+  state.lessonPlans[key]={...(state.lessonPlans[key]||{}),courseId:button.dataset.courseId,status:dialog.dataset.lessonStatus||"unplanned",manualAllocations:allocations,evaTasks:q("#evaTasks").value.trim(),homework,homeworkDue:homework?q("#homeworkDue").value:""}; saveState(); if(close) dialog.close(); renderTimetable(); if(notify) showToast("Unterrichtsstunde gespeichert");
 }
 
 function lessonAttendanceKey(lessonKeyValue,studentId) { return `${lessonKeyValue}|${studentId}`; }
@@ -722,6 +736,7 @@ function lessonGradeRows(courseId,lessonKeyValue,duration) {
 }
 
 function openLessonGradeDialog({courseId,lessonKeyValue,date,duration}) {
+  if(["eva","canceled"].includes(state.lessonPlans[lessonKeyValue]?.status)) { showToast("Für EVA und Ausfall werden keine Mitarbeitsnoten erfasst"); return; }
   const course=state.courses.find(candidate=>candidate.id===courseId); state.courseId=courseId; saveState(); const dialog=q("#detailDialog");
   dialog.innerHTML=`<div class="dialog-inner"><div class="dialog-head"><div><span class="soft-label">${new Intl.DateTimeFormat("de-DE",{weekday:"long",day:"2-digit",month:"long"}).format(new Date(`${date}T12:00:00`))} · ${duration===2?"Doppelstunde · 2×":"Einzelstunde · 1×"}</span><h3>Mitarbeit · ${escapeHtml(course.name)} ${escapeHtml(course.subject)}</h3></div><button class="close-dialog">×</button></div>
     <div class="lesson-grade-toolbar"><div class="control-group"><span class="control-label">Art des Eintrags</span><div class="segmented" id="timetableGradeCategory"><button class="active" data-lesson-grade-category="oral">Mündlich</button><button data-lesson-grade-category="other">Sonstige</button></div></div><div class="form-note">„Sonstige“ ersetzt für die ausgewählte Person die mündliche Note dieser Stunde.</div></div>
@@ -846,7 +861,7 @@ function scheduleChangeGroups() {
 
 function scheduleChangeLabel(change,key) {
   const [date,rowText]=key.split("|"); const row=Number(rowText); const from=change.rangeFrom??row; const to=change.rangeTo??row; const day=new Intl.DateTimeFormat("de-DE",{weekday:"short",day:"2-digit",month:"2-digit"}).format(new Date(`${date}T12:00:00`));
-  const kind=change.kind==="cancel"?"Ausfall":change.kind==="room"?`Raum ${change.room}`:"Vertretung / zusätzlich";
+  const kind=change.kind==="eva"?"EVA":change.kind==="cancel"?"Ausfall":change.kind==="room"?`Raum ${change.room}`:`Vertretung · ${change.title||"Unterricht"}`;
   const hours=from===to?`${timetableTimes[from]?.label}. Stunde`:`${timetableTimes[from]?.label}.–${timetableTimes[to]?.label}. Stunde`;
   return `${day} · ${hours} · ${kind}`;
 }
@@ -856,12 +871,13 @@ function restoreChangeLessonStatus(key,change) {
   const [date,rowText]=key.split("|"); const planKey=lessonKey(new Date(`${date}T12:00:00`),change.originalCourseId,Number(rowText)); const plan=state.lessonPlans[planKey];
   if(!plan?.scheduleChange) return;
   if(change.previousStatus) plan.status=change.previousStatus; else delete plan.status;
+  if(change.kind==="eva") { if(change.previousEvaTasks===undefined) delete plan.evaTasks; else plan.evaTasks=change.previousEvaTasks; }
   delete plan.scheduleChange;
   if(!Object.keys(plan).length) delete state.lessonPlans[planKey];
 }
 
 function openScheduleChangeDialog(editKey=null) {
-  const firstLessonIndex=state.timetable.findIndex(item=>item?.courseId); const firstLessonRow=Math.floor(firstLessonIndex/5); const firstLessonDate=dateKey(addDays(displayedMonday(),firstLessonIndex%5));
+  const firstLessonIndex=Math.max(0,state.timetable.findIndex(item=>item?.courseId)); const firstLessonRow=Math.floor(firstLessonIndex/5); const firstLessonDate=dateKey(addDays(displayedMonday(),firstLessonIndex%5));
   const existingGroup=editKey?scheduleChangeGroup(editKey):null; const existing=existingGroup?.change; const [savedDate,savedRow]=editKey?existingGroup.key.split("|"):[firstLessonDate,String(firstLessonRow)]; const row=Number(savedRow); const rowTo=existing?.rangeTo??row; const rowFrom=existing?.rangeFrom??row; const base=baseScheduleAt(savedDate,rowFrom); const selectedCourseId=existing?.courseId||base.item?.courseId||state.courses.find(course=>!course.organizationOnly&&!course.archived)?.id||state.courses.find(course=>!course.archived)?.id;
   const entries=scheduleChangeGroups().map(group=>`<button data-edit-schedule-change="${group.key}"><span>${escapeHtml(scheduleChangeLabel(group.change,group.key))}</span><small>Bearbeiten</small></button>`).join("");
   const dialog=q("#detailDialog");
@@ -871,8 +887,9 @@ function openScheduleChangeDialog(editKey=null) {
       <label class="form-field"><span>Datum</span><input type="date" id="scheduleChangeDate" value="${savedDate}"></label>
       <label class="form-field"><span>Von Stunde</span><select id="scheduleChangeRowFrom">${timetableTimes.map((time,index)=>`<option value="${index}" ${index===rowFrom?"selected":""}>${time.label}. Stunde · ${time.time}</option>`).join("")}</select></label>
       <label class="form-field"><span>Bis Stunde</span><select id="scheduleChangeRowTo">${timetableTimes.map((time,index)=>`<option value="${index}" ${index===rowTo?"selected":""}>${time.label}. Stunde</option>`).join("")}</select></label>
-      <label class="form-field full"><span>Art der Änderung</span><select id="scheduleChangeType"><option value="cancel" ${existing?.kind==="cancel"?"selected":""}>Unterricht fällt aus</option><option value="room" ${existing?.kind==="room"?"selected":""}>Einmaliger Raumwechsel</option><option value="replacement" ${existing?.kind==="replacement"?"selected":""}>Vertretung / zusätzlicher Unterricht</option></select></label>
-      <label class="form-field full change-course-field"><span>Kurs</span><select id="scheduleChangeCourse">${state.courses.filter(course=>!course.archived).map(course=>`<option value="${course.id}" ${course.id===selectedCourseId?"selected":""}>${escapeHtml(course.name)} · ${escapeHtml(course.subject)}</option>`).join("")}</select></label>
+      <label class="form-field full"><span>Art der Änderung</span><select id="scheduleChangeType"><option value="cancel" ${existing?.kind==="cancel"?"selected":""}>Unterricht fällt aus</option><option value="eva" ${existing?.kind==="eva"?"selected":""}>EVA · Inhalt selbstständig bearbeiten</option><option value="room" ${existing?.kind==="room"?"selected":""}>Einmaliger Raumwechsel</option><option value="replacement" ${existing?.kind==="replacement"?"selected":""}>Vertretung / zusätzlicher Unterricht</option></select></label>
+      <label class="form-field full change-course-field"><span>Vertretung · freier Eintrag</span><input id="scheduleChangeTitle" value="${escapeHtml(existing?.title || (existing?.courseId ? state.courses.filter(c=>c.id===existing.courseId).map(c=>c.name+" · "+c.subject).join("") : ""))}" placeholder="z. B. 7b · Mathematik"></label>
+      <label class="form-field full change-eva-field"><span>EVA-Aufgaben · optional</span><textarea id="scheduleChangeEvaTasks">${escapeHtml(existing?.evaTasks||"")}</textarea></label>
       <label class="form-field full change-room-field"><span>Raum</span><input id="scheduleChangeRoom" value="${escapeHtml(existing?.room ?? base.item?.room ?? "")}" placeholder="z. B. R 2"></label>
     </div>
     ${!existing&&entries?`<div class="editor-section"><div class="editor-heading"><h4>Gespeicherte Änderungen</h4><span class="soft-label">${scheduleChangeGroups().length}</span></div><div class="timetable-entry-list">${entries}</div></div>`:""}
@@ -888,31 +905,35 @@ function syncScheduleChangeDialog() {
   for(let row=from;row<=finalTo;row++) { const base=baseScheduleAt(date,row); const course=state.courses.find(candidate=>candidate.id===base.item?.courseId); if(course && !lessons.includes(`${course.name} · ${course.subject}`)) lessons.push(`${course.name} · ${course.subject}`); }
   const context=q("#scheduleChangeContext"); context.textContent=lessons.length?`Regulär betroffen: ${lessons.join(", ")}`:"Der ausgewählte Zeitraum ist regulär frei.";
   q(".change-course-field")?.classList.toggle("hidden",kind!=="replacement");
-  q(".change-room-field")?.classList.toggle("hidden",kind==="cancel");
+  q(".change-room-field")?.classList.toggle("hidden",["cancel","eva"].includes(kind));
+  q(".change-eva-field")?.classList.toggle("hidden",kind!=="eva");
   const firstBase=baseScheduleAt(date,from); const firstCourse=state.courses.find(candidate=>candidate.id===firstBase.item?.courseId);
   if(kind==="room" && firstBase.item && !q("#scheduleChangeRoom").value) q("#scheduleChangeRoom").value=firstBase.item.room||firstCourse?.room||"";
 }
 
 function saveScheduleChange(button) {
   const date=q("#scheduleChangeDate").value; const from=Number(q("#scheduleChangeRowFrom").value); const to=Number(q("#scheduleChangeRowTo").value); const kind=q("#scheduleChangeType").value; const editKey=button.dataset.editChange; const editGroup=editKey?scheduleChangeGroup(editKey):null; const editKeys=new Set(editGroup?.keys||[]);
+  if(!date || new Date(`${date}T12:00:00`).getDay()===0 || new Date(`${date}T12:00:00`).getDay()===6) { showToast("Bitte einen Schultag auswählen"); return; }
+  const title=q("#scheduleChangeTitle").value.trim(); const evaTasks=q("#scheduleChangeEvaTasks").value.trim();
+  if(kind==="replacement"&&!title) { showToast("Bitte die Vertretung eintragen"); return; }
   if(to<from) { showToast("Die Bis-Stunde muss nach der Von-Stunde liegen"); return; }
   const room=q("#scheduleChangeRoom").value.trim(); if(kind==="room" && !room) { showToast("Bitte den neuen Raum eintragen"); return; }
   const targets=new Map();
-  for(let selectedRow=from;selectedRow<=to;selectedRow++) { const base=baseScheduleAt(date,selectedRow); if((kind==="cancel" || kind==="room") && !base.item) continue; const row=base.item?base.row:selectedRow; targets.set(scheduleChangeKey(date,row),{row,base}); }
+  for(let selectedRow=from;selectedRow<=to;selectedRow++) { const base=baseScheduleAt(date,selectedRow); if((kind==="cancel" || kind==="eva" || kind==="room") && !base.item) continue; const row=base.item?base.row:selectedRow; targets.set(scheduleChangeKey(date,row),{row,base}); }
   if(!targets.size) { showToast("Im ausgewählten Zeitraum liegt kein Unterricht"); return; }
   if([...targets.keys()].some(key=>state.scheduleChanges[key] && !editKeys.has(key))) { showToast("Für mindestens eine dieser Stunden besteht bereits eine Änderung"); return; }
   editGroup?.keys.forEach(key=>{ restoreChangeLessonStatus(key,state.scheduleChanges[key]); delete state.scheduleChanges[key]; });
   const batchId=targets.size>1?`change-${Date.now()}`:"";
   targets.forEach(({row,base},key)=>{
-    const change={kind,room,rangeFrom:from,rangeTo:to,batchId}; if(kind==="replacement") change.courseId=q("#scheduleChangeCourse").value;
-    if((kind==="cancel" || kind==="replacement") && base.item?.courseId) { change.originalCourseId=base.item.courseId; const planKey=lessonKey(new Date(`${date}T12:00:00`),base.item.courseId,row); const plan=state.lessonPlans[planKey]||(state.lessonPlans[planKey]={courseId:base.item.courseId}); change.previousStatus=plan.status||""; plan.status="canceled"; plan.scheduleChange=true; }
+    const change={kind,room,rangeFrom:from,rangeTo:to,batchId}; if(kind==="replacement") change.title=title; if(kind==="eva") change.evaTasks=evaTasks;
+    if((kind==="cancel" || kind==="replacement" || kind==="eva") && base.item?.courseId) { change.originalCourseId=base.item.courseId; const planKey=lessonKey(new Date(`${date}T12:00:00`),base.item.courseId,row); const plan=state.lessonPlans[planKey]||(state.lessonPlans[planKey]={courseId:base.item.courseId}); change.previousStatus=plan.status||""; change.previousEvaTasks=plan.evaTasks; plan.status=kind==="eva"?"eva":"canceled"; if(kind==="eva") plan.evaTasks=evaTasks; plan.scheduleChange=true; }
     state.scheduleChanges[key]=change;
   });
-  saveState(); q("#detailDialog").close(); renderTimetable(); showToast(`${targets.size} Änderung${targets.size>1?"en":""} im Stundenplan gespeichert`);
+  saveState(); q("#detailDialog").close(); renderTimetable(); renderToday(); showToast(`${targets.size} Änderung${targets.size>1?"en":""} im Stundenplan gespeichert`);
 }
 
 function deleteScheduleChange(key) {
-  const group=scheduleChangeGroup(key); group?.keys.forEach(changeKey=>{ restoreChangeLessonStatus(changeKey,state.scheduleChanges[changeKey]); delete state.scheduleChanges[changeKey]; }); saveState(); q("#detailDialog").close(); renderTimetable(); showToast("Änderung entfernt");
+  const group=scheduleChangeGroup(key); group?.keys.forEach(changeKey=>{ restoreChangeLessonStatus(changeKey,state.scheduleChanges[changeKey]); delete state.scheduleChanges[changeKey]; }); saveState(); q("#detailDialog").close(); renderTimetable(); renderToday(); showToast("Änderung entfernt");
 }
 
 function openMore(studentId) {
@@ -992,7 +1013,7 @@ function initEvents() {
     const deleteSeriesButton=event.target.closest("[data-delete-series]");
     if(deleteSeriesButton) { if(deleteSeriesButton.dataset.confirmDelete!=="true") { deleteSeriesButton.dataset.confirmDelete="true"; deleteSeriesButton.textContent="Wirklich Unterrichtsreihe löschen?"; return; } deleteSeries(deleteSeriesButton.dataset.deleteSeries); return; }
     const statusButton=event.target.closest("#lessonStatusControl [data-status]");
-    if(statusButton) { q("#detailDialog").dataset.lessonStatus=statusButton.dataset.status; qa("#lessonStatusControl button").forEach(button=>button.classList.toggle("active",button===statusButton)); return; }
+    if(statusButton) { q("#detailDialog").dataset.lessonStatus=statusButton.dataset.status; qa("#lessonStatusControl button").forEach(button=>button.classList.toggle("active",button===statusButton)); syncLessonStatus(); return; }
     const saveLessonButton=event.target.closest("#saveLessonPlan");
     if(saveLessonButton) { saveLessonPlan(saveLessonButton); return; }
     const openLessonGradesButton=event.target.closest("[data-open-lesson-grades]");
@@ -1077,7 +1098,6 @@ function initEvents() {
     if(e.target.id === "courseColorInput") e.target.style.borderLeftColor=e.target.value;
     if(e.target.id === "timetableCourseInput") { const course=state.courses.find(candidate=>candidate.id===e.target.value); q("#timetableRoomInput").value=course?.room||""; }
     if(["scheduleChangeDate","scheduleChangeRowFrom","scheduleChangeRowTo","scheduleChangeType"].includes(e.target.id)) syncScheduleChangeDialog();
-    if(e.target.id==="scheduleChangeCourse" && q("#scheduleChangeType")?.value==="replacement") { const course=state.courses.find(candidate=>candidate.id===e.target.value); q("#scheduleChangeRoom").value=course?.room||""; }
     if(e.target.id==="importBackupFile" && e.target.files[0]) prepareBackup(e.target.files[0]);
     if(e.target.id==="studentImportFile" && e.target.files[0]) prepareStudentImport(e.target.files[0]);
   });
